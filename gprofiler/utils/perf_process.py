@@ -8,7 +8,6 @@ from typing import List, Optional
 
 from psutil import Process
 
-from gprofiler.exceptions import CalledProcessError
 from gprofiler.log import get_logger_adapter
 from gprofiler.utils import (
     reap_process,
@@ -190,17 +189,11 @@ class PerfProcess:
                 perf_data.unlink()
                 perf_data = inject_data
 
-            try:
-                perf_script_proc = run_process(
-                    [perf_path(), "script", "-F", "+pid,+symline", "-i", str(perf_data)],
-                    suppress_log=True,
-                )
-                return perf_script_proc.stdout.decode("utf8")
-            except CalledProcessError as e:
-                # ignore addr2line errors
-                if isinstance(e.stderr, str) and e.stderr.startswith("addr2line"):
-                    return e.stdout.decode("utf8") if isinstance(e.stdout, bytes) else str(e.stdout)
-                raise
+            perf_script_proc = run_process(
+                [perf_path(), "script", "-F", "+pid,+symline", "--no-addr2line-errors", "-i", str(perf_data)],
+                suppress_log=True,
+            )
+            return perf_script_proc.stdout.decode("utf8")
         finally:
             perf_data.unlink()
             if self._inject_jit:
