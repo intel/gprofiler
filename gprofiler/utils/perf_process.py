@@ -196,7 +196,7 @@ class PerfProcess:
                     "-F",
                     "+pid,+symline",
                     "-X",
-                    "gprofiler,py-spy",
+                    "gprofiler",
                     "--no-addr2line-errors",
                     "-i",
                     str(perf_data),
