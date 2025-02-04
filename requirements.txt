@@ -1,5 +1,5 @@
 importlib-resources==5.1.0
-psutil==5.8.0
+psutil==5.9.8
 requests==2.31.0
 ConfigArgParse==1.3
 distro==1.7.0
