@@ -1,4 +1,5 @@
 # requirements for the standalone executable
+configargparse==1.7;
 pyinstaller==5.13.1;
 # for aarch64 we build a slightly patched version
 # I tried upgrading to 0.13.6 but it crashes when the botoloader is run as non-root :/
