@@ -102,7 +102,7 @@ def test_not_root(
         wait_for_container(gprofiler)
 
     assert e.value.exit_status == 1
-    assert e.value.stderr == b"Must run gprofiler as root, please re-run.\n"
+    assert e.value.stderr == b"Not running as root, rerun with --rootless or as root.\n"
 
 
 def test_not_host_pid(

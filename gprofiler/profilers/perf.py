@@ -194,7 +194,9 @@ class SystemProfiler(ProfilerBase):
         try:
             # We want to be certain that `perf record` will collect samples.
             discovered_perf_event = discover_appropriate_perf_event(
-                Path(self._profiler_state.storage_dir), self._profiler_state.stop_event
+                Path(self._profiler_state.storage_dir),
+                self._profiler_state.stop_event,
+                self._profiler_state.processes_to_profile,
             )
             logger.debug("Discovered perf event", discovered_perf_event=discovered_perf_event.name)
             extra_args.extend(discovered_perf_event.perf_extra_args())

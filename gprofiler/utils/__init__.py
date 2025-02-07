@@ -39,7 +39,7 @@ import importlib_resources
 import psutil
 from granulate_utils.exceptions import CouldNotAcquireMutex
 from granulate_utils.linux.mutex import try_acquire_mutex
-from granulate_utils.linux.ns import run_in_ns
+from granulate_utils.linux.ns import is_root, run_in_ns_wrapper
 from granulate_utils.linux.process import is_kernel_thread, process_exe
 from psutil import Process
 
@@ -80,14 +80,6 @@ def resource_path(relative_path: str = "") -> str:
             return str(path)
     except ImportError as e:
         raise Exception(f"Resource {relative_path!r} not found!") from e
-
-
-@lru_cache(maxsize=None)
-def is_root() -> bool:
-    if is_windows():
-        return cast(int, ctypes.windll.shell32.IsUserAnAdmin()) == 1  # type: ignore
-    else:
-        return os.geteuid() == 0
 
 
 libc: Optional[ctypes.CDLL] = None
@@ -376,7 +368,11 @@ def pgrep_maps(match: str) -> List[Process]:
     for line in result.stderr.splitlines():
         if not (
             line.startswith(b"grep: /proc/")
-            and (line.endswith(b"/maps: No such file or directory") or line.endswith(b"/maps: No such process"))
+            and (
+                line.endswith(b"/maps: No such file or directory")
+                or line.endswith(b"/maps: No such process")
+                or (not is_root() and b"/maps: Permission denied" in line)
+            )
         ):
             error_lines.append(line)
     if error_lines:
@@ -455,7 +451,7 @@ def grab_gprofiler_mutex() -> bool:
     GPROFILER_LOCK = "\x00gprofiler_lock"
 
     try:
-        run_in_ns(["net"], lambda: try_acquire_mutex(GPROFILER_LOCK))
+        run_in_ns_wrapper(["net"], lambda: try_acquire_mutex(GPROFILER_LOCK))
     except CouldNotAcquireMutex:
         print(
             "Could not acquire gProfiler's lock. Is it already running?"

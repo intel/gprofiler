@@ -2,7 +2,7 @@ import datetime
 from pathlib import Path
 from typing import Optional
 
-from granulate_utils.linux.ns import run_in_ns
+from granulate_utils.linux.ns import run_in_ns_wrapper
 from granulate_utils.metadata import Metadata
 from granulate_utils.metadata.bigdata import get_bigdata_info
 from granulate_utils.metadata.cloud import get_static_cloud_metadata
@@ -20,7 +20,7 @@ def get_static_metadata(spawn_time: float, run_args: UserArgs, external_metadata
     formatted_spawn_time = datetime.datetime.utcfromtimestamp(spawn_time).replace(microsecond=0).isoformat()
     static_system_metadata = get_static_system_info()
     cloud_metadata = get_static_cloud_metadata(logger)
-    bigdata = run_in_ns(["mnt"], get_bigdata_info)
+    bigdata = run_in_ns_wrapper(["mnt"], get_bigdata_info)
 
     metadata_dict: Metadata = {
         "cloud_provider": cloud_metadata.pop("provider") if cloud_metadata is not None else "unknown",

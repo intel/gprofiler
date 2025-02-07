@@ -22,7 +22,7 @@ from subprocess import CompletedProcess
 from typing import Any, Dict, List, Match, Optional, cast
 
 from granulate_utils.linux.elf import get_elf_id
-from granulate_utils.linux.ns import get_process_nspid, run_in_ns
+from granulate_utils.linux.ns import get_process_nspid, run_in_ns_wrapper
 from granulate_utils.linux.process import (
     get_mapped_dso_elf_id,
     is_process_basename_matching,
@@ -140,7 +140,7 @@ class PythonMetadata(ApplicationMetadata):
                     timeout=self._PYTHON_TIMEOUT,
                 )
 
-            return run_in_ns(["pid", "mnt"], _run_python_process_in_ns, process.pid).stdout.decode().strip()
+            return run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid).stdout.decode().strip()
         except Exception:
             return None
 
