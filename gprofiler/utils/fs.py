@@ -21,8 +21,10 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Union
 
+from granulate_utils.linux.ns import is_root
+
 from gprofiler.platform import is_windows
-from gprofiler.utils import is_root, remove_path, run_process
+from gprofiler.utils import remove_path, run_process
 
 
 def safe_copy(src: str, dst: str) -> None:
@@ -74,6 +76,32 @@ def escape_filename(filename: str) -> str:
 def is_owned_by_root(path: Path) -> bool:
     statbuf = path.stat()
     return statbuf.st_uid == 0 and statbuf.st_gid == 0
+
+
+def mkdir_owned_root_wrapper(path: Union[str, Path], mode: int = 0o755) -> None:
+    """
+    Ensures a directory exists and writable.
+
+    If the directory exists and is not writable, the function raises.
+    If the directory exists and is not writable, it is left as is.
+    If the directory doesn't exist, it is created.
+    """
+    if is_root():
+        return mkdir_owned_root(path)
+
+    path = path if isinstance(path, Path) else Path(path)
+    if path.exists():
+        if not os.access(path, os.W_OK):
+            raise Exception(f"{str(path)} is not writable by current user")
+        return
+
+    try:
+        os.mkdir(path, mode=mode)
+    except FileExistsError:
+        # likely racing with another thread of gprofiler. as long as the directory is the user after all, we're good.
+        if not os.access(path, os.W_OK):
+            raise Exception(f"{str(path)} is not writable by current user")
+        pass
 
 
 def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:

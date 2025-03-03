@@ -27,7 +27,7 @@ from typing import Any, List, cast
 
 import psutil
 import requests
-from granulate_utils.linux.ns import get_proc_root_path, get_process_nspid, resolve_proc_root_links, run_in_ns
+from granulate_utils.linux.ns import get_proc_root_path, get_process_nspid, resolve_proc_root_links, run_in_ns_wrapper
 from granulate_utils.linux.process import is_musl, is_process_running
 from retry import retry
 from websocket import create_connection
@@ -246,7 +246,7 @@ def generate_map_for_node_processes(processes: List[psutil.Process]) -> List[psu
             nspid = get_process_nspid(process.pid)
             ns_link_name = os.readlink(f"/proc/{process.pid}/ns/pid")
             _start_debugger(process.pid)
-            run_in_ns(
+            run_in_ns_wrapper(
                 ["pid", "mnt", "net"],
                 lambda: _generate_perf_map(dest, nspid, ns_link_name, process.pid),
                 process.pid,
@@ -268,7 +268,7 @@ def clean_up_node_maps(processes: List[psutil.Process]) -> None:
             ns_link_name = os.readlink(f"/proc/{process.pid}/ns/pid")
             dest = _get_dest_inside_container(is_musl(process), node_major_version)
             _start_debugger(process.pid)
-            run_in_ns(
+            run_in_ns_wrapper(
                 ["pid", "mnt", "net"],
                 lambda: _clean_up(dest, nspid, ns_link_name, process.pid),
                 process.pid,
