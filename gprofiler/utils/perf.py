@@ -21,6 +21,8 @@ from pathlib import Path
 from threading import Event
 from typing import List, Optional
 
+from psutil import Process
+
 from gprofiler.exceptions import CalledProcessError, PerfNoSupportedEvent
 from gprofiler.gprofiler_types import ProcessToStackSampleCounters
 from gprofiler.log import get_logger_adapter
@@ -66,7 +68,9 @@ class SupportedPerfEvent(Enum):
         return ["-e", self.value]
 
 
-def discover_appropriate_perf_event(tmp_dir: Path, stop_event: Event) -> SupportedPerfEvent:
+def discover_appropriate_perf_event(
+    tmp_dir: Path, stop_event: Event, pids: Optional[List[Process]] = None
+) -> SupportedPerfEvent:
     """
     Get the appropriate event should be used by `perf record`.
 
@@ -95,7 +99,7 @@ def discover_appropriate_perf_event(tmp_dir: Path, stop_event: Event) -> Support
                 is_dwarf=False,
                 inject_jit=False,
                 extra_args=current_extra_args,
-                processes_to_profile=None,
+                processes_to_profile=pids,
                 switch_timeout_s=15,
             )
             perf_process.start()

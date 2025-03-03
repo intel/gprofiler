@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 
 import distro
 import psutil
-from granulate_utils.linux.ns import run_in_ns
+from granulate_utils.linux.ns import run_in_ns_wrapper
 
 from gprofiler.log import get_logger_adapter
 from gprofiler.platform import is_linux, is_windows
@@ -357,7 +357,7 @@ def _initialize_system_info() -> Any:
         except Exception:
             logger.exception("Failed to get the local IP")
 
-    run_in_ns(["mnt", "uts", "net"], get_infos)
+    run_in_ns_wrapper(["mnt", "uts", "net"], get_infos)
 
     return hostname, distribution, libc_version, mac_address, local_ip
 
