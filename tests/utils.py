@@ -417,13 +417,13 @@ def assert_jvm_flags_equal(actual_jvm_flags: Optional[List], expected_jvm_flags:
     assert len(actual_jvm_flags) == len(expected_jvm_flags), f"{actual_jvm_flags} != {expected_jvm_flags}"
 
     for actual_flag_dict, expected_flag_dict in zip(actual_jvm_flags, expected_jvm_flags):
-        actual_flag_value = actual_flag_dict.pop("value")
-        expected_flag_value = expected_flag_dict.pop("value")
+        actual_flag_val = actual_flag_dict.pop("value")
+        expected_flag_val = expected_flag_dict.pop("value")
 
-        if expected_flag_value is not None:
+        if expected_flag_val is not None:
             assert (
-                actual_flag_value == expected_flag_value
-            ), f"{actual_flag_dict|{'value': actual_flag_value}} != {expected_flag_dict|{'value': expected_flag_value}}"
+                actual_flag_val == expected_flag_val
+            ), f"{actual_flag_dict | {'value': actual_flag_val}} != {expected_flag_dict | {'value': expected_flag_val}}"
 
         assert actual_flag_dict == expected_flag_dict
 
