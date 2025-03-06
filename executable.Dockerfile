@@ -194,12 +194,12 @@ RUN set -e; \
     fi
 RUN set -e; \
     if [ "$(uname -m)" = "aarch64" ]; then \
-        python3 -m pip install --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
+        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
     fi
 
 # we want the latest pip
 # hadolint ignore=DL3013
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir --upgrade pip
 
 FROM ${NODE_PACKAGE_BUILDER_GLIBC} as node-package-builder-glibc
 USER 0
@@ -224,10 +224,10 @@ COPY requirements.txt requirements.txt
 COPY granulate-utils/setup.py granulate-utils/requirements.txt granulate-utils/README.md granulate-utils/
 COPY granulate-utils/granulate_utils granulate-utils/granulate_utils
 COPY granulate-utils/glogger granulate-utils/glogger
-RUN python3 -m pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r requirements.txt
 
 COPY exe-requirements.txt exe-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r exe-requirements.txt
+RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r exe-requirements.txt
 
 # copy PyPerf, licenses and notice file.
 RUN mkdir -p gprofiler/resources/ruby && \
@@ -287,7 +287,7 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
         git apply ../staticx_patch.diff && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
-        python3 -m pip install --no-cache-dir . ; \
+        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir . ; \
     fi
 
 RUN yum install -y patchelf upx && yum clean all

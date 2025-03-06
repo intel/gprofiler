@@ -36,7 +36,7 @@ mkdir builds && cd builds
 
 ZLIB_VERSION="1.3.1"
 ZLIB_FILE="zlib-$ZLIB_VERSION.tar.xz"
-wget "https://zlib.net/$ZLIB_FILE"
+curl "https://zlib.net/$ZLIB_FILE" > $ZLIB_FILE
 tar -xf "$ZLIB_FILE"
 cd "zlib-$ZLIB_VERSION"
 # note the use of --prefix here. it matches the directory https://github.com/benfred/remoteprocess/blob/master/build.rs expects to find libs for musl.
