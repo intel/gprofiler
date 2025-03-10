@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from threading import Event, RLock, Thread
 from typing import List, Optional
 
+import os
 import subprocess
 import psutil
 
@@ -20,17 +21,17 @@ class Metrics:
     # The average RAM usage between gProfiler cycles
     mem_avg: Optional[float]
     # The CPU frequency between gProfiler cycles
-    cpu_freq: Optional[float]
+    cpu_freq: Optional[float] = None
     # The CPI between gProfiler cycles
-    cpu_cpi: Optional[float]
+    cpu_cpi: Optional[float] = None
     # The CPU TMA frontend bound between gProfiler cycles
-    cpu_tma_fe_bound: Optional[float]
+    cpu_tma_fe_bound: Optional[float] = None
     # The CPU TMA backend bound between gProfiler cycles
-    cpu_tma_be_bound: Optional[float]
+    cpu_tma_be_bound: Optional[float] = None
     # The CPU TMA bad speculation between gProfiler cycles
-    cpu_tma_bad_spec: Optional[float]
+    cpu_tma_bad_spec: Optional[float] = None
     # The CPU TMA retiring between gProfiler cycles
-    cpu_tma_retiring: Optional[float]
+    cpu_tma_retiring: Optional[float] = None
 
 class SystemMetricsMonitorBase(metaclass=ABCMeta):
     @abstractmethod
@@ -61,11 +62,19 @@ class SystemMetricsMonitorBase(metaclass=ABCMeta):
 
     def get_metrics(self) -> Metrics:
         hw_metrics = self._get_hw_metrics()
-        return Metrics(self._get_cpu_utilization(), self._get_average_memory_utilization(), hw_metrics[0], hw_metrics[1], hw_metrics[2], hw_metrics[3], hw_metrics[4], hw_metrics[5])
+        if hw_metrics and len(hw_metrics) == 6:
+            return Metrics(self._get_cpu_utilization(), self._get_average_memory_utilization(), hw_metrics[0], hw_metrics[1], hw_metrics[2], hw_metrics[3], hw_metrics[4], hw_metrics[5])
+        else:
+            return Metrics(self._get_cpu_utilization(), self._get_average_memory_utilization())
 
 
 class SystemMetricsMonitor(SystemMetricsMonitorBase):
-    def __init__(self, stop_event: Event, polling_rate_seconds: int = DEFAULT_POLLING_INTERVAL_SECONDS):
+    def __init__(
+        self,
+        stop_event: Event,
+        polling_rate_seconds: int = DEFAULT_POLLING_INTERVAL_SECONDS,
+        perfspect_path: str = None
+    ):
         self._polling_rate_seconds = polling_rate_seconds
         self._mem_percentages: List[float] = []
         self._stop_event = stop_event
@@ -74,42 +83,46 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
         self._perfspect_thread: Optional[Thread] = None
         self._hw_metrics = {'cpu_freq':[], 'cpu_cpi':[], 'cpu_tma_fe_bound':[], 'cpu_tma_be_bound':[], 'cpu_tma_bad_spec':[], 'cpu_tma_retiring':[]}
         self._ps_process = None
+        self._perfspect_path = perfspect_path
 
         self._get_cpu_utilization()  # Call this once to set the necessary data
 
     def start(self) -> None:
         assert self._thread is None, "SystemMetricsMonitor is already running"
-        assert self._perfspect_thread is None, "Perfspect is already running"
         assert not self._stop_event.is_set(), "Stop condition is already set (perhaps gProfiler was already stopped?)"
         self._thread = Thread(target=self._continuously_poll_memory, args=(self._polling_rate_seconds,))
         self._thread.start()
 
-        ps_cmd = ['/tmp/perfspect', 'metrics', '--metrics', '"CPU operating frequency (in GHz)","CPI","TMA_Frontend_Bound(%)","TMA_Bad_Speculation(%)","TMA_Backend_Bound(%)","TMA_Retiring(%)"', '--duration', '0', '--live', '--format', 'csv', '--interval', '10']
-        self._ps_process = subprocess.Popen(ps_cmd, stdout=subprocess.PIPE)
-#        ps_stdout, ps_stderr = ps_process.communicate()
-#        try:
-#            # wait 2 seconds to ensure it starts
-#            ps_process.wait(2)
-#        except subprocess.TimeoutExpired:
-#            pass
-#        else:
-#            raise Exception(f"Command {ps_cmd} exited unexpectedly with {ps_process.returncode}")
-        self._perfspect_thread = Thread(target=self._continuously_poll_perfspect, args=(self._polling_rate_seconds,))
-        self._perfspect_thread.start()
+        if self._perfspect_path:
+            assert self._perfspect_thread is None, "Perfspect is already running"
+            ps_cmd = [self._perfspect_path, 'metrics', '--metrics', '"CPU operating frequency (in GHz)","CPI","TMA_Frontend_Bound(%)","TMA_Bad_Speculation(%)","TMA_Backend_Bound(%)","TMA_Retiring(%)"', '--duration', '0', '--live', '--format', 'csv', '--interval', '10']
+            self._ps_process = subprocess.Popen(ps_cmd, stdout=subprocess.PIPE)
+        #    ps_stdout, ps_stderr = ps_process.communicate()
+        #    try:
+        #        # wait 2 seconds to ensure it starts
+        #        ps_process.wait(2)
+        #    except subprocess.TimeoutExpired:
+        #        pass
+        #    else:
+        #        raise Exception(f"Command {ps_cmd} exited unexpectedly with {ps_process.returncode}")
+            self._perfspect_thread = Thread(target=self._continuously_poll_perfspect, args=(self._polling_rate_seconds,))
+            self._perfspect_thread.start()
 
     def stop(self) -> None:
         assert self._thread is not None, "SystemMetricsMonitor is not running"
-        assert self._perfspect_thread is not None, "Perfspect is not running"
         assert self._stop_event.is_set(), "Stop event was not set before stopping the SystemMetricsMonitor"
         self._thread.join(STOP_TIMEOUT_SECONDS)
         if self._thread.is_alive():
             raise ThreadStopTimeoutError("Timed out while waiting for the SystemMetricsMonitor internal thread to stop")
         self._thread = None
-        self._ps_process.kill()
-        self._perfspect_thread.join(STOP_TIMEOUT_SECONDS)
-        if self._perfspect_thread.is_alive():
-            raise ThreadStopTimeoutError("Timed out while waiting for the SystemMetricsMonitor Perfspect thread to stop")
-        self._perfspect_thread = None
+
+        if self._perfspect_path:
+            self._ps_process.kill()
+            assert self._perfspect_thread is not None, "Perfspect is not running"
+            self._perfspect_thread.join(STOP_TIMEOUT_SECONDS)
+            if self._perfspect_thread.is_alive():
+                raise ThreadStopTimeoutError("Timed out while waiting for the SystemMetricsMonitor Perfspect thread to stop")
+            self._perfspect_thread = None
 
     def _continuously_poll_memory(self, polling_rate_seconds: int) -> None:
         while not self._stop_event.is_set():
@@ -125,7 +138,7 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
             if metrics_str.startswith('TS,SKT,CPU,CID'):
                 continue
             metric_values = metrics_str.split(',')
-            if len(metric_values) > 0:
+            if len(metric_values) > 0 and metric_values[0] != '':
                 self._hw_metrics['cpu_freq'].append(float(metric_values[4]))
                 self._hw_metrics['cpu_cpi'].append(float(metric_values[5]))
                 self._hw_metrics['cpu_tma_fe_bound'].append(float(metric_values[6]))
@@ -172,7 +185,7 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
         self._hw_metrics['cpu_tma_retiring'] = []
 
         return metric_list
-    
+
 
 class NoopSystemMetricsMonitor(SystemMetricsMonitorBase):
     def start(self) -> None:
