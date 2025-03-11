@@ -195,8 +195,7 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
             return average_memory
 
     def _get_cpu_utilization(self) -> float:
-        return psutil.cpu_percent(interval=None)  # type: ignore # virtual_memory doesn't have a
-        # return type is types-psutil
+        return psutil.cpu_percent(interval=None)
 
     def _get_hw_metrics(self) -> List[float]:
         current_length = len(self._hw_metrics["cpu_freq"])
