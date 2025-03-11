@@ -1,11 +1,11 @@
+import os
 import statistics
+import subprocess
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from threading import Event, RLock, Thread
 from typing import List, Optional
 
-import os
-import subprocess
 import psutil
 
 from gprofiler.exceptions import ThreadStopTimeoutError
