@@ -181,8 +181,7 @@ class GProfiler:
         self._usage_logger = usage_logger
         if self._collect_metrics:
             self._system_metrics_monitor: SystemMetricsMonitorBase = SystemMetricsMonitor(
-                stop_event = self._profiler_state.stop_event,
-                perfspect_path = perfspect_path
+                stop_event=self._profiler_state.stop_event, perfspect_path=perfspect_path
             )
         else:
             self._system_metrics_monitor = NoopSystemMetricsMonitor()

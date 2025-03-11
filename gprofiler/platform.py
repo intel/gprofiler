@@ -30,6 +30,7 @@ def is_windows() -> bool:
 def is_linux() -> bool:
     return sys.platform == LINUX_PLATFORM_NAME
 
+
 @lru_cache(maxsize=None)
 def is_aarch64() -> bool:
     return platform.machine() == "aarch64"
