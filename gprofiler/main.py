@@ -57,7 +57,7 @@ from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.external_metadata import ExternalMetadataStaleError, read_external_metadata
 from gprofiler.metadata.metadata_collector import get_current_metadata, get_static_metadata
 from gprofiler.metadata.system_metadata import get_hostname, get_run_mode, get_static_system_info
-from gprofiler.platform import is_linux, is_windows
+from gprofiler.platform import is_aarch64, is_linux, is_windows
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.factory import get_profilers
 from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase, ProfilerInterface
@@ -137,6 +137,7 @@ class GProfiler:
         controller_process: Optional[Process] = None,
         external_metadata_path: Optional[Path] = None,
         heartbeat_file_path: Optional[Path] = None,
+        perfspect_path: Optional[Path] = None,
     ):
         self._output_dir = output_dir
         self._flamegraph = flamegraph
@@ -157,6 +158,7 @@ class GProfiler:
         self._duration = duration
         self._external_metadata_path = external_metadata_path
         self._heartbeat_file_path = heartbeat_file_path
+        self._perfspect_path = perfspect_path
         if self._collect_metadata:
             self._static_metadata = get_static_metadata(self._spawn_time, user_args, self._external_metadata_path)
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
@@ -179,7 +181,8 @@ class GProfiler:
         self._usage_logger = usage_logger
         if self._collect_metrics:
             self._system_metrics_monitor: SystemMetricsMonitorBase = SystemMetricsMonitor(
-                self._profiler_state.stop_event
+                stop_event=self._profiler_state.stop_event,
+                perfspect_path=str(perfspect_path) if perfspect_path else None,
             )
         else:
             self._system_metrics_monitor = NoopSystemMetricsMonitor()
@@ -834,6 +837,17 @@ def parse_cmd_args() -> configargparse.Namespace:
         "The file modification indicates the last snapshot time.",
     )
 
+    if is_linux() and not is_aarch64():
+        hw_metrics_options = parser.add_argument_group("hardware metrics")
+        hw_metrics_options.add_argument(
+            "--perfspect-path",
+            type=str,
+            dest="intel_perfspect_path",
+            default=None,
+            help="Enable HW metrics collection with Intel PerfSpect."
+            " Provide path to PerfSpect binary to enable collection.",
+        )
+
     args = parser.parse_args()
 
     args.perf_inject = args.nodejs_mode == "perf"
@@ -1103,6 +1117,13 @@ def main() -> None:
         if args.heartbeat_file is not None:
             heartbeat_file_path = Path(args.heartbeat_file)
 
+        perfspect_path: Optional[Path] = None
+        if args.intel_perfspect_path is not None:
+            perfspect_path = Path(args.intel_perfspect_path)
+            if not perfspect_path.is_file():
+                logger.error(f"Perfspect binary file {args.perfspect_path} does not exist!")
+                sys.exit(1)
+
         try:
             log_system_info()
         except Exception:
@@ -1187,6 +1208,7 @@ def main() -> None:
             processes_to_profile=processes_to_profile,
             external_metadata_path=external_metadata_path,
             heartbeat_file_path=heartbeat_file_path,
+            perfspect_path=perfspect_path,
         )
         logger.info("gProfiler initialized and ready to start profiling")
         if args.continuous:
