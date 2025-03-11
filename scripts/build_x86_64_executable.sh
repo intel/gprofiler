@@ -16,11 +16,18 @@
 #
 set -euo pipefail
 
-if [ "$#" -gt 0 ] && [ "$1" == "--fast" ]; then
+if [[ ("$#" -gt 0 && "$1" == "--fast") || ("$#" -gt 1 && "$2" == "--fast") ]]; then
     with_staticx=false
     shift
 else
     with_staticx=true
+fi
+
+if [[ ("$#" -gt 0 && "$1" == "--proxy") || ("$#" -gt 1 && "$2" == "--proxy") ]]; then
+    with_proxy=true
+    shift
+else
+    with_proxy=false
 fi
 
 # pyspy & rbspy, using the same builder for both pyspy and rbspy since they share build dependencies - rust:1.59-alpine3.15
@@ -65,4 +72,5 @@ docker buildx build -f executable.Dockerfile --output type=local,dest=build/x86_
     --build-arg NODE_PACKAGE_BUILDER_MUSL=$AP_BUILDER_ALPINE \
     --build-arg NODE_PACKAGE_BUILDER_GLIBC=$NODE_PACKAGE_BUILDER_GLIBC \
     --build-arg STATICX=$with_staticx \
+    --build-arg PROXY=$with_proxy \
     . "$@"

@@ -171,6 +171,9 @@ RUN ./openssl_build.sh
 COPY ./scripts/python310_build.sh .
 RUN ./python310_build.sh
 
+ARG PROXY=false
+ENV PROXY=${PROXY}
+
 # gProfiler part
 
 WORKDIR /app
@@ -194,12 +197,20 @@ RUN set -e; \
     fi
 RUN set -e; \
     if [ "$(uname -m)" = "aarch64" ]; then \
-        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
+        if [ "$PROXY" = "true" ]; then \
+            python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
+        else \
+            python3 -m pip install --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
+        fi \
     fi
 
 # we want the latest pip
 # hadolint ignore=DL3013
-RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir --upgrade pip
+RUN if [ "$PROXY" = "true" ]; then \
+        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir --upgrade pip; \
+    else \
+        python3 -m pip install --no-cache-dir --upgrade pip; \
+    fi
 
 FROM ${NODE_PACKAGE_BUILDER_GLIBC} as node-package-builder-glibc
 USER 0
@@ -224,10 +235,18 @@ COPY requirements.txt requirements.txt
 COPY granulate-utils/setup.py granulate-utils/requirements.txt granulate-utils/README.md granulate-utils/
 COPY granulate-utils/granulate_utils granulate-utils/granulate_utils
 COPY granulate-utils/glogger granulate-utils/glogger
-RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r requirements.txt
+RUN if [ "$PROXY" = "true" ]; then \
+        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r requirements.txt; \
+    else \
+        python3 -m pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 COPY exe-requirements.txt exe-requirements.txt
-RUN python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r exe-requirements.txt
+RUN if [ "$PROXY" = "true" ]; then \
+        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir -r exe-requirements.txt; \
+    else \
+        python3 -m pip install --no-cache-dir -r exe-requirements.txt; \
+    fi
 
 # copy PyPerf, licenses and notice file.
 RUN mkdir -p gprofiler/resources/ruby && \
@@ -287,7 +306,11 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
         git apply ../staticx_patch.diff && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
-        python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir . ; \
+        if [ "$PROXY" = "true" ]; then \
+            python3 -m pip install --trusted-host files.pythonhosted.org --trusted-host pypi.org --no-cache-dir . ; \
+        else \
+            python3 -m pip install --no-cache-dir . ; \
+        fi \
     fi
 
 RUN yum install -y patchelf upx && yum clean all
