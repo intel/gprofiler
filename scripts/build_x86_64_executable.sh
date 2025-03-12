@@ -24,10 +24,10 @@ else
 fi
 
 if [[ ("$#" -gt 0 && "$1" == "--proxy") || ("$#" -gt 1 && "$2" == "--proxy") ]]; then
-    with_proxy=true
+    with_proxy="--trusted-host files.pythonhosted.org --trusted-host pypi.org"
     shift
 else
-    with_proxy=false
+    with_proxy=""
 fi
 
 # pyspy & rbspy, using the same builder for both pyspy and rbspy since they share build dependencies - rust:1.59-alpine3.15
@@ -72,5 +72,5 @@ docker buildx build -f executable.Dockerfile --output type=local,dest=build/x86_
     --build-arg NODE_PACKAGE_BUILDER_MUSL=$AP_BUILDER_ALPINE \
     --build-arg NODE_PACKAGE_BUILDER_GLIBC=$NODE_PACKAGE_BUILDER_GLIBC \
     --build-arg STATICX=$with_staticx \
-    --build-arg PROXY=$with_proxy \
+    --build-arg PROXY="$with_proxy" \
     . "$@"
