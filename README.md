@@ -111,6 +111,36 @@ Make sure you are not passing `-s` to the `-ldflags` during your build - `-s` om
     * `smart` - Run both `fp` and `dwarf`, then choose the result with the highest average of stack frames count, per process.
     * `disabled` - Avoids running `perf` at all. See [perf-less mode](#perf-less-mode).
 
+## Rootless mode
+gProfiler can be run in rootless mode, profiling without root or sudo access with limited functionality.
+
+Profiling is limited to perf (not java, python, ruby, etc.), and requires passing --pids with a list of processes owned by the current user.
+
+If the default directories for the log file and pid file (e.g., /var/log or /var/run ) are not writable by the current user, these must be explicitly directed to a writable path with --log-file LOG_FILE and --pid-file PID_FILE respectively. If gProfiler was run previously as root or with sudo, it will create the temporary directory "gprofiler_tmp" in the default location (usually /tmp) or wherever specified. If gProfiler is run again with --rootless, it will fail to run as it will be trying to write to the gprofiler_tmp directory which has already been created by root user. Delete this root owned directory or redirect to a different (user writable) directory and re-run with --rootless.
+
+Some additional configuration may be required to operate without root.
+
+### perf_event_paranoid
+By default /proc/sys/kernel/perf_event_paranoid may be configured such that perf cannot operate without root. Consider setting to -1 if --rootless indicates permission errors (this is the least secure mode, so refer to https://www.kernel.org/doc/html/latest/admin-guide/perf-security.html for security information). It may also be necessary to set perf_event_mlock_kb.
+* -1: Allow use of (almost) all events by all users
+Ignore mlock limit after perf_event_mlock_kb without CAP_IPC_LOCK
+* 0: Disallow raw and ftrace function tracepoint access
+* 1: Disallow CPU event access
+* 2: Disallow kernel profiling
+To make the adjusted perf_event_paranoid setting permanent, preserve it in /etc/sysctl.conf (e.g., kernel.perf_event_paranoid = <setting>).
+
+### perf_event_mlock_kb
+This controls the size of per-cpu ring buffer not counted against mlock limit. The default value is 512 + 1 page. Depending on the value or perf_event_paranoid, it may be necessary to set perf_event_mlock_kb.
+
+To make adjustment to perf_event_mlock_kb setting permanent preserve it in /etc/sysctl.conf (e.g., kernel.perf_event_mlock_kb = <setting>).
+
+### kptr_restrict
+This toggle indicates whether restrictions are placed on exposing kernel addresses via /proc and other interfaces. In order to get better visibility into kernel callstacks in flamegraphs, /proc/sys/kernel/kptr_restrict can be set to 0. For more information refer to https://docs.kernel.org/admin-guide/sysctl/kernel.html#kptr-restrict.)
+
+echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
+
+To make adjustment to kptr_restrict setting permanent preserve it in /etc/sysctl.conf (e.g., kernel.kptr_restrict = <setting>).
+
 ## Other options
 
 ### Using HTTP proxies
