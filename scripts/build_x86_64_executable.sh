@@ -24,7 +24,7 @@ else
 fi
 
 if [[ ("$#" -gt 0 && "$1" == "--proxy") || ("$#" -gt 1 && "$2" == "--proxy") ]]; then
-    with_proxy="--trusted-host files.pythonhosted.org --trusted-host pypi.org"
+    with_proxy="files.pythonhosted.org pypi.org"
     shift
 else
     with_proxy=""
