@@ -119,7 +119,7 @@ def _files_from_legacy(dist: pkg_resources.Distribution) -> Optional[Iterator[st
     except (FileNotFoundError, KeyError):
         return None
     paths = (p for p in text.splitlines(keepends=False) if p)
-    root = dist.location  # type: ignore
+    root = dist.location
     info = dist.egg_info
     if root is None or info is None:
         return paths
@@ -138,7 +138,7 @@ def _get_package_name(dist: pkg_resources.Distribution) -> Optional[str]:
     if metadata:
         # The metadata should NEVER be missing the Name: key, but if it somehow
         # does, fall back to the known canonical name.
-        return metadata.get("Name", dist.project_name)  # type: ignore
+        return metadata.get("Name", dist.project_name)
     return None
 
 
