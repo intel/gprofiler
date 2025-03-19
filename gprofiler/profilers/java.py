@@ -350,7 +350,7 @@ def get_java_version(process: Process, stop_event: Event) -> Optional[str]:
     def _run_java_version() -> "CompletedProcess[bytes]":
         return run_process(
             [
-                cast(str, process_java_path),
+                cast(str, process_java_path),  # type: ignore
                 "-version",
             ],
             stop_event=stop_event,
