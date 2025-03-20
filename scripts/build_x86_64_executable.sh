@@ -43,8 +43,8 @@ UBUNTU_VERSION=@sha256:cf31af331f38d1d7158470e095b132acd126a7180a54f263d386da88e
 AP_BUILDER_CENTOS=@sha256:0f4ec88e21daf75124b8a9e5ca03c37a5e937e0e108a255d890492430789b60e
 # async-profiler musl - alpine
 AP_BUILDER_ALPINE=@sha256:69704ef328d05a9f806b6b8502915e6a0a4faa4d72018dc42343f511490daf8a
-# dotnet builder - mcr.microsoft.com/dotnet/sdk:6.0-focal
-DOTNET_BUILDER=@sha256:749439ff7a431ab4bc38d43cea453dff9ae1ed89a707c318b5082f9b2b25fa22
+# dotnet builder - mcr.microsoft.com/dotnet/sdk:6.0.428-1-focal
+DOTNET_BUILDER=@sha256:525ce79a6f545131df515ce34f7ee086eb18e4d707eff9676b2678f2f23b6d9e
 # minimum CentOS version we intend to support with async-profiler (different between x86_64, where we require
 # an older version)
 AP_CENTOS_MIN=:6
