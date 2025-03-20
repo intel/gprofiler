@@ -1,5 +1,5 @@
-# mcr.microsoft.com/dotnet/sdk:6.0-focal
-FROM  mcr.microsoft.com/dotnet/sdk@sha256:749439ff7a431ab4bc38d43cea453dff9ae1ed89a707c318b5082f9b2b25fa22
+# mcr.microsoft.com/dotnet/sdk:6.0.428-1-focal
+FROM mcr.microsoft.com/dotnet/sdk@sha256:525ce79a6f545131df515ce34f7ee086eb18e4d707eff9676b2678f2f23b6d9e
 
 WORKDIR /app/Fibonacci
 

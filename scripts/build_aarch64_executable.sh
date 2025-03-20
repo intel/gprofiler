@@ -35,8 +35,8 @@ CENTOS8_VERSION=@sha256:a27fd8080b517143cbbbab9dfb7c8571c40d67d534bbdee55bd6c473
 GOLANG_VERSION=@sha256:f7d3519759ba6988a2b73b5874b17c5958ac7d0aa48a8b1d84d66ef25fa345f1
 # alpine 3.14.2
 ALPINE_VERSION=@sha256:b06a5cf61b2956088722c4f1b9a6f71dfe95f0b1fe285d44195452b8a1627de7
-# mcr.microsoft.com/dotnet/sdk:6.0-focal
-DOTNET_BUILDER=@sha256:749439ff7a431ab4bc38d43cea453dff9ae1ed89a707c318b5082f9b2b25fa22
+# dotnet builder - mcr.microsoft.com/dotnet/sdk:6.0.428-1-focal
+DOTNET_BUILDER=@sha256:525ce79a6f545131df515ce34f7ee086eb18e4d707eff9676b2678f2f23b6d9e
 # Take image from build-prepare stage
 NODE_PACKAGE_BUILDER_GLIBC=build-prepare
 
