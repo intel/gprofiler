@@ -15,6 +15,7 @@
 #
 
 import logging
+import time
 from threading import Event
 from typing import Dict, cast
 
@@ -144,6 +145,7 @@ def test_perf_comm_change(
     I'm not sure it can be done, i.e is this info even kept anywhere).
     """
     with system_profiler as profiler:
+        time.sleep(2)
         # first run - we get the changed name, because the app started before perf began recording.
         _assert_comm_in_profile(profiler, application_pid, False)
 
@@ -170,6 +172,7 @@ def test_perf_thread_comm_is_process_comm(
     starts after perf, the exec comm of the process should be used (see test_perf_comm_change)
     """
     with system_profiler as profiler:
+        time.sleep(2)
         # running perf & script now with --show-task-events would show:
         #   pative 1925947 [010] 987095.272656: PERF_RECORD_COMM: pative:1925904/1925947
         # our perf will prefer to use the exec comm, OR oldest comm available if exec
@@ -396,6 +399,14 @@ def test_get_average_frame_count(samples: str, count: float) -> None:
                 dso_false="std::__1::__function::__func<Envoy::Event::DispatcherImpl::createFileEvent(int, std::__1::function<void (unsigned int)>, Envoy::Event::FileTriggerType, unsigned int)::$_5, std::__1::allocator<Envoy::Event::DispatcherImpl::createFileEvent(int, std::__1::function<void (unsigned int)>, Envoy::Event::FileTriggerType, unsigned int)::$_5>, void (unsigned int)>::operator()",  # noqa
             ),
             id="frame_with_space_parenthesis",
+        ),
+        pytest.param(
+            "   4af76b main.cpuIntensiveWork+bar.go:21+bar.go:14 (/tmp/perf/my_go_app)",
+            dict(
+                dso_true="main.cpuIntensiveWork+bar.go:21+bar.go:14 (/tmp/perf/my_go_app)",
+                dso_false="main.cpuIntensiveWork+bar.go:21+bar.go:14",
+            ),
+            id="frame_with_symline",
         ),
     ],
 )
