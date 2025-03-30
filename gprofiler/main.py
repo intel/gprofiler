@@ -212,11 +212,7 @@ class GProfiler:
         atomically_symlink(os.path.basename(output_path), last_output)
         # delete if rotating & there was a link target before.
         if self._rotating_output and os.path.basename(prev_output) != last_output_name:
-            # can't use missing_ok=True, available only from 3.8 :/
-            try:
-                prev_output.unlink()
-            except FileNotFoundError:
-                pass
+            prev_output.unlink(missing_ok=True)
 
     def _generate_output_files(
         self,
@@ -445,7 +441,7 @@ def _submit_profile_logged(
         logger.exception("Error occurred sending profile to server")
     else:
         logger.info("Successfully uploaded profiling data to the server")
-        return response_dict.get("gpid", "")
+        return cast(str, response_dict.get("gpid", ""))
     return ""
 
 

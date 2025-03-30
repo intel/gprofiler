@@ -23,7 +23,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from threading import Event
-from typing import Any, List, cast
+from typing import Any, Generator, List, cast
 
 import psutil
 import requests
@@ -135,7 +135,7 @@ def _evaluate_js_command(sock: WebSocket, command: str, expected_result: ResultT
     sock.send(json.dumps(cdp_request))
     message = sock.recv()
     try:
-        message = json.loads(message)
+        loaded_message = json.loads(message)
     except json.JSONDecodeError:
         if expected_result == ResultType.NONE and len(message) == 0:
             return message
@@ -143,21 +143,21 @@ def _evaluate_js_command(sock: WebSocket, command: str, expected_result: ResultT
             raise NodeDebuggerUnexpectedResponse(message) from None
     try:
         if (
-            isinstance(message["result"]["result"]["value"], str)
-            and message["result"]["result"]["value"] == "process undefined"
+            isinstance(loaded_message["result"]["result"]["value"], str)
+            and loaded_message["result"]["result"]["value"] == "process undefined"
         ):
-            raise NodeDebuggerProcessUndefined(message)
+            raise NodeDebuggerProcessUndefined(loaded_message)
     except KeyError:
-        raise NodeDebuggerUnexpectedResponse(message) from None
+        raise NodeDebuggerUnexpectedResponse(loaded_message) from None
     if (
-        "result" not in message.keys()
-        or "result" not in message["result"].keys()
-        or "type" not in message["result"]["result"].keys()
+        "result" not in loaded_message.keys()
+        or "result" not in loaded_message["result"].keys()
+        or "type" not in loaded_message["result"]["result"].keys()
     ):
-        raise NodeDebuggerUnexpectedResponse(message)
-    if expected_result.value != message["result"]["result"]["type"]:
-        raise NodeDebuggerUnexpectedResponse(message)
-    return message["result"]["result"]["value"]
+        raise NodeDebuggerUnexpectedResponse(loaded_message)
+    if expected_result.value != loaded_message["result"]["result"]["type"]:
+        raise NodeDebuggerUnexpectedResponse(loaded_message)
+    return loaded_message["result"]["result"]["value"]
 
 
 def _change_dso_state(sock: WebSocket, module_path: str, action: str, pid: int) -> None:
@@ -189,7 +189,7 @@ def _validate_pid(expected_pid: int, sock: WebSocket) -> None:
 
 
 @contextmanager
-def create_debugger_socket(nspid: int, ns_link_name: str, pid: int) -> WebSocket:
+def create_debugger_socket(nspid: int, ns_link_name: str, pid: int) -> Generator[WebSocket]:
     sock = None
     try:
         debugger_url = _get_debugger_url()

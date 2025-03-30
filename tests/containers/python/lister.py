@@ -41,7 +41,7 @@ def parser():
     while True:
         # Have some package stacks.
         # Notice the name of the package name (PyYAML) is different from the name of the module (yaml)
-        yaml.parse("")  # type: ignore
+        yaml.parse("")
 
 
 if __name__ == "__main__":
