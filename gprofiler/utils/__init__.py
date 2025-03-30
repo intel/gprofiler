@@ -16,6 +16,7 @@
 import ctypes
 import datetime
 import glob
+import importlib.resources
 import logging
 import os
 import random
@@ -35,7 +36,6 @@ from tempfile import TemporaryDirectory
 from threading import Event
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union, cast
 
-import importlib_resources
 import psutil
 from granulate_utils.exceptions import CouldNotAcquireMutex
 from granulate_utils.linux.mutex import try_acquire_mutex
@@ -76,7 +76,7 @@ def resource_path(relative_path: str = "") -> str:
     *relative_directory, basename = relative_path.split("/")
     package = ".".join(["gprofiler", "resources"] + relative_directory)
     try:
-        with importlib_resources.path(package, basename) as path:
+        with importlib.resources.path(package, basename) as path:
             return str(path)
     except ImportError as e:
         raise Exception(f"Resource {relative_path!r} not found!") from e
@@ -411,12 +411,7 @@ def touch_path(path: str, mode: int) -> None:
 
 
 def remove_path(path: Union[str, Path], missing_ok: bool = False) -> None:
-    # backporting missing_ok, available only from 3.8
-    try:
-        Path(path).unlink()
-    except FileNotFoundError:
-        if not missing_ok:
-            raise
+    Path(path).unlink(missing_ok=missing_ok)
 
 
 @contextmanager
