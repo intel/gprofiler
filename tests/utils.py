@@ -421,9 +421,10 @@ def assert_jvm_flags_equal(actual_jvm_flags: Optional[List], expected_jvm_flags:
         expected_flag_value = expected_flag_dict.pop("value")
 
         if expected_flag_value is not None:
-            assert (
-                actual_flag_value == expected_flag_value
-            ), f"{actual_flag_dict|{'value': actual_flag_value}} != {expected_flag_dict|{'value': expected_flag_value}}"
+            assert actual_flag_value == expected_flag_value, (
+                f"{actual_flag_dict | {'value': actual_flag_value}} != "
+                f"{expected_flag_dict | {'value': expected_flag_value}}"
+            )
 
         assert actual_flag_dict == expected_flag_dict
 
