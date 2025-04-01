@@ -269,6 +269,7 @@ jobs:
       run: NO_APT_INSTALL=1 ./tests/test.sh --ignore=tests/test_executable.py
 
   build-container-aarch64:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build-executable-aarch64
     runs-on: ubuntu-22.04-arm
     steps:
