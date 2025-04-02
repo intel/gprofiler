@@ -25,8 +25,8 @@ declare -a linux_deps=("libclrjit.so"
                        )
 for i in "${linux_deps[@]}"
 do
-   cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
+   cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.36/$i" "/tmp/dotnet/deps/$i"
 done
 while read -r i  ; do
-   cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
+   cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.36/$i" "/tmp/dotnet/deps/$i"
 done <./dotnet_trace_dependencies.txt
