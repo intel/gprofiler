@@ -14,12 +14,12 @@
 # limitations under the License.
 #
 
-from typing import Optional, cast
-from urllib.request import getproxies_environment  # type: ignore  # incorrectly yells at it
+from typing import Optional
+from urllib.request import getproxies_environment
 
 
 def get_https_proxy() -> Optional[str]:
     """
     We follow what requests uses.
     """
-    return cast(Optional[str], getproxies_environment().get("https"))
+    return getproxies_environment().get("https")
