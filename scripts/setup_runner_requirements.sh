@@ -20,5 +20,6 @@ set -euo pipefail
 # on GH runners, this is used for our self-hosted runners)
 
 sudo apt update
+sudo apt remove containerd.io # This is required when running on Github runner Ubuntu 22.04-arm64
 sudo apt install -y docker.io python3-pip python-is-python3 build-essential
 sudo chmod o+rw /var/run/docker.sock
