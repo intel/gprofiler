@@ -18,12 +18,13 @@ import os
 import shutil
 import signal
 import stat
+from collections.abc import Generator
 from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from threading import Event
-from typing import Any, Generator, List, cast
+from typing import Any, List, cast
 
 import psutil
 import requests
@@ -189,7 +190,7 @@ def _validate_pid(expected_pid: int, sock: WebSocket) -> None:
 
 
 @contextmanager
-def create_debugger_socket(nspid: int, ns_link_name: str, pid: int) -> Generator[WebSocket]:
+def create_debugger_socket(nspid: int, ns_link_name: str, pid: int) -> Generator[WebSocket, None, None]:
     sock = None
     try:
         debugger_url = _get_debugger_url()
