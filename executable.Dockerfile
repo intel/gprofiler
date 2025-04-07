@@ -280,9 +280,8 @@ RUN pyinstaller pyinstaller.spec \
 COPY scripts/staticx_patch.diff staticx_patch.diff
 # hadolint ignore=DL3003
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        git clone -b v0.13.6 https://github.com/JonathonReinhart/staticx.git && \
+        git clone -b v0.14.1 https://github.com/JonathonReinhart/staticx.git && \
         cd staticx && \
-        git reset --hard 819d8eafecbaab3646f70dfb1e3e19f6bbc017f8 && \
         git apply ../staticx_patch.diff && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
