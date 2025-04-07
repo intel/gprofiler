@@ -27,6 +27,7 @@ from gprofiler.metadata import ProfileMetadata
 from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.external_metadata import PidToAppMetadata
 from gprofiler.system_metrics import Metrics
+from gprofiler.hw_metrics import HWMetrics
 from gprofiler.utils import merge_dicts
 
 logger = get_logger_adapter(__name__)
@@ -54,6 +55,7 @@ def _make_profile_metadata(
     add_container_names: bool,
     metadata: ProfileMetadata,
     metrics: Metrics,
+    hwmetrics: Optional[HWMetrics],
     application_metadata: Optional[List[Optional[Dict]]],
     application_metadata_enabled: bool,
 ) -> str:
@@ -73,6 +75,8 @@ def _make_profile_metadata(
         "application_metadata": application_metadata,
         "application_metadata_enabled": application_metadata_enabled,
         "profiling_mode": metadata["profiling_mode"],
+        "hwmetrics": hwmetrics.metrics_data if hwmetrics is not None else None,
+        "htmlblob": hwmetrics.metrics_html if hwmetrics is not None else None,
     }
     return "# " + json.dumps(profile_metadata)
 
@@ -201,6 +205,7 @@ def concatenate_profiles(
     enrichment_options: EnrichmentOptions,
     metadata: ProfileMetadata,
     metrics: Metrics,
+    hwmetrics: Optional[HWMetrics],
     external_app_metadata: PidToAppMetadata,
 ) -> str:
     """
@@ -226,6 +231,7 @@ def concatenate_profiles(
             enrichment_options.container_names,
             metadata,
             metrics,
+            hwmetrics,
             application_metadata,
             enrichment_options.application_metadata,
         ),
@@ -241,6 +247,7 @@ def merge_profiles(
     enrichment_options: EnrichmentOptions,
     metadata: ProfileMetadata,
     metrics: Metrics,
+    hwmetrics: Optional[HWMetrics],
     external_app_metadata: PidToAppMetadata,
 ) -> str:
     # merge process profiles into the global perf results.
@@ -283,5 +290,6 @@ def merge_profiles(
         enrichment_options=enrichment_options,
         metadata=metadata,
         metrics=metrics,
+        hwmetrics=hwmetrics,
         external_app_metadata=external_app_metadata,
     )

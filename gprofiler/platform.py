@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 import sys
+import platform
 from functools import lru_cache
 
 WINDOWS_PLATFORM_NAME = "win32"
@@ -28,3 +29,8 @@ def is_windows() -> bool:
 @lru_cache(maxsize=None)
 def is_linux() -> bool:
     return sys.platform == LINUX_PLATFORM_NAME
+
+
+@lru_cache(maxsize=None)
+def is_aarch64() -> bool:
+    return platform.machine() == "aarch64"
