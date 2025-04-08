@@ -27,6 +27,8 @@ for i in "${linux_deps[@]}"
 do
    cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
 done
+patchelf --remove-rpath /tmp/dotnet/deps/dotnet-trace
+patchelf --force-rpath --set-rpath '$ORIGIN/netcoredeps' /tmp/dotnet/deps/dotnet-trace
 while read -r i  ; do
    cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
 done <./dotnet_trace_dependencies.txt
