@@ -28,6 +28,8 @@ do
    cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
 done
 patchelf --remove-rpath /tmp/dotnet/tools/dotnet-trace
+# I want the $ORIGIN not expanded.
+# shellcheck disable=SC2016
 patchelf --force-rpath --set-rpath '$ORIGIN/netcoredeps' /tmp/dotnet/tools/dotnet-trace
 while read -r i  ; do
    cp "/usr/share/dotnet/shared/Microsoft.NETCore.App/6.0.7/$i" "/tmp/dotnet/deps/$i"
