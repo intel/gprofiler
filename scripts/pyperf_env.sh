@@ -55,7 +55,6 @@ if [ -n "$with_staticx" ]; then
     if [ "$(uname -m)" = "aarch64" ]; then
         exit 0;
     fi
-    python3 -m pip install
     git clone -b main https://github.com/JonathonReinhart/staticx.git
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
