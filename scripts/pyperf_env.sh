@@ -80,7 +80,7 @@ if [ -n "$with_staticx" ]; then
         exit 0;
     fi
     python3 -m pip install --upgrade pip
-    python3 -m pip install wheel
+    python3 -m pip install --upgrade setuptools
     python3 -m pip install scons
     git clone -b main https://github.com/JonathonReinhart/staticx.git
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
