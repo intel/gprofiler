@@ -58,5 +58,5 @@ cd ..
 # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
 # can only build with latest llvm (>10), which cannot be obtained on CentOS.
 if [ -n "$with_staticx" ]; then
-    python3staticx ./root/share/bcc/examples/cpp/PyPerf ./root/share/bcc/examples/cpp/PyPerf
+    staticx ./root/share/bcc/examples/cpp/PyPerf ./root/share/bcc/examples/cpp/PyPerf
 fi
