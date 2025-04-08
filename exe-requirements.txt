@@ -1,2 +1,2 @@
 pyinstaller==6.12.0
-staticx==0.14.1; platform.machine == "x86_64"
+staticx @ git+https://github.com/JonathonReinhart/staticx@main; platform.machine == "x86_64"

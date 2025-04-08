@@ -226,8 +226,13 @@ COPY granulate-utils/granulate_utils granulate-utils/granulate_utils
 COPY granulate-utils/glogger granulate-utils/glogger
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
+# From some reason the build for staticx from code in this container is not easy. We need to preinstall deps (scons)
+# and disable build isolation
 COPY exe-requirements.txt exe-requirements.txt
-RUN python3 -m pip install --no-cache-dir -r exe-requirements.txt
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+        python3 -m pip install --no-cache-dir scons==4.2.0; \
+    fi
+RUN python3 -m pip install --no-build-isolation --no-cache-dir -r exe-requirements.txt
 
 # copy PyPerf, licenses and notice file.
 RUN mkdir -p gprofiler/resources/ruby && \
