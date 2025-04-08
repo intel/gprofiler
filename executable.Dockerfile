@@ -176,6 +176,7 @@ WORKDIR /app
 RUN yum --setopt=skip_missing_names_on_install=False install -y \
         gcc \
         curl \
+        glibc-static \
         libicu && \
     yum clean all
 
@@ -274,13 +275,15 @@ RUN pyinstaller pyinstaller.spec \
     && test -f build/pyinstaller/warn-pyinstaller.txt \
     && ./check_pyinstaller.sh
 
+# We need staticx main as version wasn't released yet for PyInstaller hooks throwing on non elfs.
+# Removed build isolation as from some reason there's an issue with scons on the isolated env.
 # hadolint ignore=DL3003
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        git clone -b v0.14.1 https://github.com/JonathonReinhart/staticx.git && \
+        git clone -b main https://github.com/JonathonReinhart/staticx.git && \
         cd staticx && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
-        python3 -m pip install --no-cache-dir . ; \
+        python3 -m pip install --no-cache-dir  --no-build-isolation . ; \
     fi
 
 RUN yum install -y patchelf upx && yum clean all

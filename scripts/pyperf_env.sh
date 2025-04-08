@@ -55,15 +55,15 @@ if [ -n "$with_staticx" ]; then
     if [ "$(uname -m)" = "aarch64" ]; then
         exit 0;
     fi
-    git clone -b v0.14.1 https://github.com/JonathonReinhart/staticx.git
+    python3 -m pip install
+    git clone -b main https://github.com/JonathonReinhart/staticx.git
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
     cd staticx
     # - apply patch to ensure staticx bootloader propagates dump signal to actual PyPerf binary
-    # - apply patch removing calls to getpwnam and getgrnam,
     # to avoid crashing the staticx bootloader on ubuntu:22.04+ and centos:8+
     git apply ../staticx_for_pyperf_patch.diff
-    python3 -m pip install --no-cache-dir .
+    python3 -m pip install --no-cache-dir --no-build-isolation .
     cd ..
     rm -rf staticx
 fi
