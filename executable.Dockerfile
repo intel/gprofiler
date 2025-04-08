@@ -47,7 +47,7 @@ FROM mcr.microsoft.com/dotnet/sdk${DOTNET_BUILDER} as dotnet-builder
 WORKDIR /tmp
 RUN apt-get update && \
   dotnet tool install --global dotnet-trace --version 6.0.351802 && \
-  apt-get install -y patchelf
+  apt-get install -y --no-install-recommends patchelf
 
 RUN cp -r "$HOME/.dotnet" "/tmp/dotnet"
 COPY scripts/dotnet_prepare_dependencies.sh .
