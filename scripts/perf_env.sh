@@ -78,7 +78,7 @@ rm -r zstd-$ZSTD_VERSION zstd-$ZSTD_VERSION.tar.gz
 
 # install newer versions of elfutils
 ELFUTILS_VERSION=0.187
-curl --retry-delay 5 --retry 5 -L https://sourceware.org/elfutils/ftp/$ELFUTILS_VERSION/elfutils-$ELFUTILS_VERSION.tar.bz2 -o elfutils-$ELFUTILS_VERSION.tar.bz2  # sourceware is flaky, so we have some retries
+curl --retry-delay 5 --retry 15 -L https://sourceware.org/elfutils/ftp/$ELFUTILS_VERSION/elfutils-$ELFUTILS_VERSION.tar.bz2 -o elfutils-$ELFUTILS_VERSION.tar.bz2  # sourceware is flaky, so we have some retries
 tar -xf elfutils-$ELFUTILS_VERSION.tar.bz2
 pushd elfutils-$ELFUTILS_VERSION
 # disable debuginfod, otherwise it will try to dlopen("libdebuginfod.so") in runtime & that can

@@ -16,12 +16,6 @@
 #
 set -euo pipefail
 
-export PYENV_ROOT="$HOME/.pyenv"
-[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init - bash)"
-eval "$(pyenv virtualenv-init -)"
-pyenv global 3.10
-
 if [ "$#" -gt 1 ]; then
     echo "Too many arguments"
     exit 1
@@ -43,6 +37,12 @@ if [ "$(uname -m)" != "x86_64" ]; then
     touch /bcc/bcc/NOTICE
     exit 0
 fi
+
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
+eval "$(pyenv virtualenv-init -)"
+pyenv global 3.10
 
 git clone --depth 1 -b v1.5.0 https://github.com/Granulate/bcc.git && cd bcc && git reset --hard 928423128e10020934df1f7b4641e56b502c2946
 
