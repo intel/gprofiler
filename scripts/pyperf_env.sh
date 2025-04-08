@@ -40,7 +40,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     iperf llvm-12-dev \
     clang-12 libclang-12-dev \
     cmake \
-    python3 python3-pip \
     flex \
     libfl-dev \
     bison \
@@ -49,12 +48,40 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     liblzma-dev \
     ca-certificates \
     git \
-    patchelf scons
+    patchelf \
+    make \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    wget \
+    llvm \
+    libncurses5-dev \
+    libncursesw5-dev \
+    xz-utils \
+    tk-dev \
+    libffi-dev \
+    liblzma-dev \
+    python-openssl
+
+# Install specific python version.
+curl -fsSL https://pyenv.run | bash
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
+eval "$(pyenv virtualenv-init -)"
+
+pyenv install 3.10
+pyenv global 3.10
 
 if [ -n "$with_staticx" ]; then
     if [ "$(uname -m)" = "aarch64" ]; then
         exit 0;
     fi
+    python3 -m pip install --upgrade pip
+    python3 -m pip install wheel
+    python3 -m pip install scons
     git clone -b main https://github.com/JonathonReinhart/staticx.git
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
@@ -71,3 +98,4 @@ fi
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
+

@@ -16,6 +16,12 @@
 #
 set -euo pipefail
 
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
+eval "$(pyenv virtualenv-init -)"
+pyenv global 3.10
+
 if [ "$#" -gt 1 ]; then
     echo "Too many arguments"
     exit 1
@@ -52,5 +58,5 @@ cd ..
 # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
 # can only build with latest llvm (>10), which cannot be obtained on CentOS.
 if [ -n "$with_staticx" ]; then
-    staticx ./root/share/bcc/examples/cpp/PyPerf ./root/share/bcc/examples/cpp/PyPerf
+    python3staticx ./root/share/bcc/examples/cpp/PyPerf ./root/share/bcc/examples/cpp/PyPerf
 fi
