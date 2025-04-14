@@ -278,7 +278,7 @@ RUN pyinstaller pyinstaller.spec \
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
         git clone  https://github.com/Granulate/staticx.git && \
         cd staticx && \
-        git checkout 383bab96bf84a6c15378665b33b87203d327767d && \
+        git checkout 82b59582a643bf24a34994c388b37c493878e523 && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
         python3 -m pip install --no-cache-dir . ; \
