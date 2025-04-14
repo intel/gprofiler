@@ -81,11 +81,12 @@ if [ -n "$with_staticx" ]; then
     fi
     python3 -m pip install --upgrade pip
     python3 -m pip install --upgrade setuptools
-    python3 -m pip install scons
-    git clone -b main https://github.com/JonathonReinhart/staticx.git
+    git clone https://github.com/Granulate/staticx.git
+
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
     cd staticx
+    git checkout 383bab96bf84a6c15378665b33b87203d327767d # After fixing build deps
     # - apply patch to ensure staticx bootloader propagates dump signal to actual PyPerf binary
     # to avoid crashing the staticx bootloader on ubuntu:22.04+ and centos:8+
     git apply ../staticx_for_pyperf_patch.diff

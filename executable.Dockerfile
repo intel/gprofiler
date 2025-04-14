@@ -192,10 +192,6 @@ RUN set -e; \
     if [ "$(uname -m)" = "aarch64" ]; then \
          ln -s /usr/lib64/python3.10/lib-dynload /usr/lib/python3.10/lib-dynload; \
     fi
-RUN set -e; \
-    if [ "$(uname -m)" = "aarch64" ]; then \
-        python3 -m pip install --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
-    fi
 
 # we want the latest pip
 # hadolint ignore=DL3013
@@ -226,13 +222,8 @@ COPY granulate-utils/granulate_utils granulate-utils/granulate_utils
 COPY granulate-utils/glogger granulate-utils/glogger
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
-# From some reason the build for staticx from code in this container is not easy. We need to preinstall deps (scons)
-# and disable build isolation
 COPY exe-requirements.txt exe-requirements.txt
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        python3 -m pip install --no-cache-dir scons==4.2.0; \
-    fi
-RUN python3 -m pip install --no-build-isolation --no-cache-dir -r exe-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r exe-requirements.txt
 
 # copy PyPerf, licenses and notice file.
 RUN mkdir -p gprofiler/resources/ruby && \
@@ -285,11 +276,12 @@ RUN pyinstaller pyinstaller.spec \
 # Removed build isolation as from some reason there's an issue with scons on the isolated env.
 # hadolint ignore=DL3003
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        git clone -b main https://github.com/JonathonReinhart/staticx.git && \
+        git clone  https://github.com/Granulate/staticx.git && \
         cd staticx && \
+        git checkout 383bab96bf84a6c15378665b33b87203d327767d && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
-        python3 -m pip install --no-cache-dir  --no-build-isolation . ; \
+        python3 -m pip install --no-cache-dir . ; \
     fi
 
 RUN yum install -y patchelf upx && yum clean all
