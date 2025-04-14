@@ -86,7 +86,7 @@ if [ -n "$with_staticx" ]; then
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
     cd staticx
-    git checkout 82b59582a643bf24a34994c388b37c493878e523 # After fixing build deps
+    git checkout 33eefdadc72832d5aa67c0792768c9e76afb746d # After fixing build deps
     # - apply patch to ensure staticx bootloader propagates dump signal to actual PyPerf binary
     # to avoid crashing the staticx bootloader on ubuntu:22.04+ and centos:8+
     git apply ../staticx_for_pyperf_patch.diff
