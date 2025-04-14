@@ -90,7 +90,7 @@ if [ -n "$with_staticx" ]; then
     # - apply patch to ensure staticx bootloader propagates dump signal to actual PyPerf binary
     # to avoid crashing the staticx bootloader on ubuntu:22.04+ and centos:8+
     git apply ../staticx_for_pyperf_patch.diff
-    python3 -m pip install --no-cache-dir --no-build-isolation .
+    python3 -m pip install --no-cache-dir .
     cd ..
     rm -rf staticx
 fi
