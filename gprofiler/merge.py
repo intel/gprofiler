@@ -22,12 +22,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.gprofiler_types import ProcessToProfileData, ProfileData, ProfilingErrorStack, StackToSampleCount
+from gprofiler.hw_metrics import HWMetrics
 from gprofiler.log import get_logger_adapter
 from gprofiler.metadata import ProfileMetadata
 from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.external_metadata import PidToAppMetadata
 from gprofiler.system_metrics import Metrics
-from gprofiler.hw_metrics import HWMetrics
 from gprofiler.utils import merge_dicts
 
 logger = get_logger_adapter(__name__)

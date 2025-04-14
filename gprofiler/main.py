@@ -23,7 +23,6 @@ import shutil
 import sys
 import time
 import traceback
-import json
 from pathlib import Path
 from threading import Event
 from types import TracebackType
@@ -49,6 +48,7 @@ from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.diagnostics import log_diagnostics, set_diagnostics
 from gprofiler.exceptions import APIError, NoProfilersEnabledError
 from gprofiler.gprofiler_types import ProcessToProfileData, UserArgs, integers_list, positive_integer
+from gprofiler.hw_metrics import HWMetricsMonitor, HWMetricsMonitorBase, NoopHWMetricsMonitor
 from gprofiler.log import RemoteLogsHandler, initial_root_logger_setup
 from gprofiler.merge import concatenate_from_external_file, concatenate_profiles, merge_profiles
 from gprofiler.metadata import ProfileMetadata
@@ -64,7 +64,6 @@ from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase,
 from gprofiler.profilers.registry import get_profilers_registry
 from gprofiler.state import State, init_state
 from gprofiler.system_metrics import Metrics, NoopSystemMetricsMonitor, SystemMetricsMonitor, SystemMetricsMonitorBase
-from gprofiler.hw_metrics import HWMetrics, NoopHWMetricsMonitor, HWMetricsMonitor, HWMetricsMonitorBase
 from gprofiler.usage_loggers import CgroupsUsageLogger, NoopUsageLogger, UsageLoggerInterface
 from gprofiler.utils import (
     TEMPORARY_STORAGE_PATH,
@@ -126,7 +125,7 @@ class GProfiler:
         external_metadata_path: Optional[Path] = None,
         heartbeat_file_path: Optional[Path] = None,
         perfspect_path: Optional[Path] = None,
-        perfspect_duration: Optional[int] = 60,
+        perfspect_duration: int = 60,
     ):
         self._output_dir = output_dir
         self._flamegraph = flamegraph
@@ -185,7 +184,7 @@ class GProfiler:
                 perfspect_duration=self._perfspect_duration,
             )
         else:
-            self._hw_metrics_monitor = NoopHWMetricsMonitor()            
+            self._hw_metrics_monitor = NoopHWMetricsMonitor()
 
         if isinstance(self.system_profiler, NoopProfiler) and not self.process_profilers:
             raise NoProfilersEnabledError()
@@ -349,7 +348,7 @@ class GProfiler:
             else:
                 logger.info("Collected hw metrics_html")
                 # logger.info(hwmetrics.metrics_html[:50])
-        
+
         try:
             external_app_metadata = read_external_metadata(self._external_metadata_path).application
         except ExternalMetadataStaleError:
@@ -876,7 +875,7 @@ def parse_cmd_args() -> configargparse.Namespace:
             dest="tool_perfspect_duration",
             default=60,
             help="The default perfspect tool collection time is 60 second.",
-        )           
+        )
 
     args = parser.parse_args()
 
@@ -1140,9 +1139,9 @@ def main() -> None:
         if args.tool_perfspect_path is not None:
             perfspect_path = Path(args.tool_perfspect_path)
             if not perfspect_path.is_file():
-                logger.error(f"PerfSpect binary file {args.tool_perfspect_path} does not exist!")
+                logger.error(f"PerfSpect tool {args.tool_perfspect_path} does not exist!")
                 sys.exit(1)
-                
+
         try:
             log_system_info()
         except Exception:
