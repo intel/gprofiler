@@ -149,20 +149,10 @@ RUN if grep -q "CentOS Linux 8" /etc/os-release ; then \
         ./fix_centos7.sh; \
     fi
 
-# update libmodulemd to fix https://bugzilla.redhat.com/show_bug.cgi?id=2004853
-RUN yum install -y epel-release && yum clean all
-RUN yum install -y libmodulemd && yum clean all
-
 # python 3.10 installation && yum clean all
 WORKDIR /python
-RUN yum install -y bzip2-devel && yum clean all
-RUN yum install -y libffi-devel && yum clean all
-RUN yum install -y perl-core && yum clean all
-RUN yum install -y zlib-devel && yum clean all
-RUN yum install -y xz-devel && yum clean all
-RUN yum install -y ca-certificates && yum clean all
-RUN yum install -y wget && yum clean all
-RUN yum groupinstall -y "Development Tools" && yum clean all
+COPY scripts/prepare_centos.sh .
+RUN ./prepare_centos.sh
 
 COPY ./scripts/openssl_build.sh .
 RUN ./openssl_build.sh

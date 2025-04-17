@@ -15,22 +15,19 @@
 # limitations under the License.
 #
 set -euo pipefail
+set -o xtrace
 
 retry() {
-  local retries="$1" # First argument
-  local command="$2" # Second argument
+  local retries="$1"
+  local command="$2"
 
-  # Run the command, and save the exit code
-  $command
+  bash -c "$command"
   local exit_code=$?
 
-  # If the exit code is non-zero (i.e. command failed), and we have not
-  # reached the maximum number of retries, run the command again
   if [[ $exit_code -ne 0 && $retries -gt 0 ]]; then
     echo "$command failed with $exit_code"
     retry $((retries - 1)) "$command"
   else
-    # Return the exit code from the command
     return $exit_code
   fi
 }
