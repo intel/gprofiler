@@ -16,7 +16,7 @@
 #
 set -eu
 
-LIBUNWIND_VERSION=1.6.2
+LIBUNWIND_VERSION=1.8.1
 LIBUNWIND_TAR=libunwind-"$LIBUNWIND_VERSION".tar.gz
 
 curl -L https://github.com/libunwind/libunwind/releases/download/v"$LIBUNWIND_VERSION"/"$LIBUNWIND_TAR" -o "$LIBUNWIND_TAR"
