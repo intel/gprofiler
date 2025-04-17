@@ -16,6 +16,24 @@
 #
 set -euo pipefail
 
+retry() {
+  local retries="$1" # First argument
+  local command="$2" # Second argument
+
+  # Run the command, and save the exit code
+  $command
+  local exit_code=$?
+
+  # If the exit code is non-zero (i.e. command failed), and we have not
+  # reached the maximum number of retries, run the command again
+  if [[ $exit_code -ne 0 && $retries -gt 0 ]]; then
+    retry $(($retries - 1)) "$command"
+  else
+    # Return the exit code from the command
+    return $exit_code
+  fi
+}
+
 apt-get update
 apt-get install -y --no-install-recommends \
     gcc \
@@ -52,7 +70,7 @@ ZSTD_VERSION=1.5.2
 curl -L https://github.com/facebook/zstd/releases/download/v$ZSTD_VERSION/zstd-$ZSTD_VERSION.tar.gz -o zstd-$ZSTD_VERSION.tar.gz
 tar -xf zstd-$ZSTD_VERSION.tar.gz
 pushd zstd-$ZSTD_VERSION
-make -j && make install
+retry 3 "make -j" && retry 3 "make install"
 popd
 rm -r zstd-$ZSTD_VERSION zstd-$ZSTD_VERSION.tar.gz
 
