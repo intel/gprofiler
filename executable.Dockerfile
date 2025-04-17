@@ -150,22 +150,23 @@ RUN if grep -q "CentOS Linux 8" /etc/os-release ; then \
     fi
 
 # update libmodulemd to fix https://bugzilla.redhat.com/show_bug.cgi?id=2004853
-RUN yum install -y epel-release && \
-    yum install -y libmodulemd && \
-    yum clean all
+RUN yum install -y epel-release
+RUN yum install -y libmodulemd
+RUN yum clean all
 
 # python 3.10 installation
 WORKDIR /python
-RUN yum install -y \
-    bzip2-devel \
-    libffi-devel \
-    perl-core \
-    zlib-devel \
-    xz-devel \
-    ca-certificates \
-    wget && \
-    yum groupinstall -y "Development Tools" && \
-    yum clean all
+RUN yum install -y
+RUN yum install -y bzip2-devel
+RUN yum install -y libffi-devel
+RUN yum install -y perl-core
+RUN yum install -y zlib-devel
+RUN yum install -y xz-devel
+RUN yum install -y ca-certificates
+RUN yum install -y wget
+RUN yum groupinstall -y "Development Tools"
+RUN yum clean all
+
 COPY ./scripts/openssl_build.sh .
 RUN ./openssl_build.sh
 COPY ./scripts/python310_build.sh .
