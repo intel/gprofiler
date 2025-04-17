@@ -36,7 +36,7 @@ spec:
             limits:
               cpu: 500m
               memory: 1Gi
-          image: index.docker.io/granulate/gprofiler:latest
+          image: index.docker.io/intel/gprofiler:latest
           imagePullPolicy: Always
           args:
             - -cu

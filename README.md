@@ -179,10 +179,10 @@ This section lists the various execution modes for gProfiler (as a container, as
 ## Running as a Docker container
 Run the following to have gProfiler running continuously, uploading to Granulate Performance Studio:
 ```bash
-docker pull granulate/gprofiler:latest
+docker pull intel/gprofiler:latest
 docker run --name granulate-gprofiler -d --restart=on-failure:10 \
     --pid=host --userns=host --privileged \
-	granulate/gprofiler:latest -cu --token="<TOKEN>" --service-name="<SERVICE NAME>" [options]
+	intel/gprofiler:latest -cu --token="<TOKEN>" --service-name="<SERVICE NAME>" [options]
 ```
 
 ## Running as an executable
@@ -524,8 +524,8 @@ Please refer to the [building](./CONTRIBUTING.md#building) section.
 
 # Contribute
 We welcome all feedback and suggestion through Github Issues:
-* [Submit bugs and feature requests](https://github.com/granulate/gprofiler/issues)
-* Upvote [popular feature requests](https://github.com/granulate/gprofiler/issues?q=is%3Aopen+is%3Aissue+label%3Aenhancement+sort%3Areactions-%2B1-desc+)
+* [Submit bugs and feature requests](https://github.com/intel/gprofiler/issues)
+* Upvote [popular feature requests](https://github.com/intel/gprofiler/issues?q=is%3Aopen+is%3Aissue+label%3Aenhancement+sort%3Areactions-%2B1-desc+)
 
 ## Releasing a new version
 1. Update `__version__` in `__init__.py`.

@@ -11,7 +11,7 @@ resources:
     memory: 256Mi
 
 image:
-  repository: index.docker.io/granulate/gprofiler
+  repository: index.docker.io/intel/gprofiler
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: latest

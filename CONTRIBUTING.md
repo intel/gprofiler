@@ -15,7 +15,7 @@ on you machine:
 
 To get the source of `gprofiler`, clone the git repository via:
 ````bash
-git clone --recursive https://github.com/granulate/gprofiler
+git clone --recursive https://github.com/intel/gprofiler
 ````
 
 Make sure to clone in `--recursive` mode! The project uses submodules. If you didn't clone recursively, run `git submodule update --init`.
@@ -72,7 +72,7 @@ If you want particular artifacts (e.g one of the built profilers) but don't want
 ./scripts/copy_resources_from_image.sh
 ```
 
-The above command will get the `granulate/gprofiler:latest` image and extract all dependencies to the `gprofiler/resources` directory.
+The above command will get the `intel/gprofiler:latest` image and extract all dependencies to the `gprofiler/resources` directory.
 
 ### Debugging the build
 
