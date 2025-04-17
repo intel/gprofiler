@@ -17,13 +17,14 @@ import json
 import os
 import platform
 import re
+import stat
 import subprocess
 from contextlib import contextmanager
 from logging import LogRecord
 from pathlib import Path
 from threading import Event
 from time import sleep
-from typing import Any, Dict, Iterator, List, Optional, cast
+from typing import Any, Dict, Iterator, List, Optional, Union, cast
 
 from docker import DockerClient
 from docker.errors import ContainerError
@@ -45,6 +46,7 @@ from gprofiler.profilers.java import (
 )
 from gprofiler.profilers.profiler_base import ProfilerInterface
 from gprofiler.utils import remove_path, wait_event
+from tests import CONTAINERS_DIRECTORY
 
 RUNTIME_PROFILERS = [
     ("java", "ap"),
@@ -329,12 +331,54 @@ def _print_process_output(popen: subprocess.Popen) -> None:
     print(f"stderr: {stderr.decode()}")
 
 
+def ensure_uid_gid_access_recursive(paths: List[Union[str, Path]], uid: int = 1000, gid: int = 1000) -> None:
+    for base_path in paths:
+        if not os.path.exists(base_path):
+            continue
+
+        for root, dirs, files in os.walk(base_path):
+            # Handle the root directory itself
+            _ensure_access(root, gid)
+
+            # Update access for each subdirectory
+            for d in dirs:
+                dir_path = os.path.join(root, d)
+                _ensure_access(dir_path, gid)
+
+            # Update access for each file
+            for f in files:
+                file_path = os.path.join(root, f)
+                _ensure_access(file_path, gid)
+
+
+def _ensure_access(path: str, gid: int) -> None:
+    # Change group ownership to gid
+    os.chown(path, -1, gid)
+
+    # Get current permissions
+    st = os.stat(path)
+    mode = st.st_mode
+
+    # Ensure group has read/write (files) or read/execute (dirs)
+    if os.path.isdir(path):
+        needed = stat.S_IRGRP | stat.S_IXGRP
+    else:
+        needed = stat.S_IRGRP | stat.S_IWGRP
+
+    new_mode = mode | needed
+    if new_mode != mode:
+        os.chmod(path, new_mode)
+
+
 @contextmanager
 def _application_process(command_line: List[str], check_app_exited: bool) -> Iterator[subprocess.Popen]:
     # run as non-root to catch permission errors, etc.
     def lower_privs() -> None:
         os.setgid(1000)
         os.setuid(1000)
+
+    # This is required in order to make sure that the user has permissions to run what it needs to run in tests...
+    ensure_uid_gid_access_recursive([CONTAINERS_DIRECTORY], 1000, 1000)
 
     popen = subprocess.Popen(
         command_line, preexec_fn=lower_privs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/tmp"
@@ -421,9 +465,10 @@ def assert_jvm_flags_equal(actual_jvm_flags: Optional[List], expected_jvm_flags:
         expected_flag_value = expected_flag_dict.pop("value")
 
         if expected_flag_value is not None:
-            assert (
-                actual_flag_value == expected_flag_value
-            ), f"{actual_flag_dict|{'value': actual_flag_value}} != {expected_flag_dict|{'value': expected_flag_value}}"
+            assert actual_flag_value == expected_flag_value, (
+                f"{actual_flag_dict | {'value': actual_flag_value}} != "
+                f"{expected_flag_dict | {'value': expected_flag_value}}"
+            )
 
         assert actual_flag_dict == expected_flag_dict
 
