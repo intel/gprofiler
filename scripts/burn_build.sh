@@ -17,7 +17,7 @@
 set -euo pipefail
 DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-git clone -b "$(awk '/VERSION/{print $2}' <"${DIR}/burn_version.txt")" https://github.com/intel/burn
+git clone -b "$(awk '/VERSION/{print $2}' <"${DIR}/burn_version.txt")" https://github.com/granulate/burn
 cd burn
 git reset --hard "$(awk '/COMMIT/{print $2}' <"${DIR}/burn_version.txt")"
 
