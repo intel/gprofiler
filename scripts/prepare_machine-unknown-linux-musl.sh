@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 set -eu
+set -o xtrace
 
 # prepares the environment for building py-spy & rbspy:
 # 1. installs the rust target $(uname -m)-unknown-linux-musl - this can build static binaries
