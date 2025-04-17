@@ -30,8 +30,10 @@ else
     with_proxy=""
 fi
 
-# pyspy & rbspy, using the same builder for both pyspy and rbspy since they share build dependencies - rust:1.86.0-alpine3.21
-RUST_BUILDER_VERSION=@sha256:541a1720c1cedddae9e17b4214075bf57c20bc7b176b4bba6bce3437c44d51ef
+# rust:1.86.0-alpine3.21
+PYSPY_RUST_BUILDER_VERSION=@sha256:541a1720c1cedddae9e17b4214075bf57c20bc7b176b4bba6bce3437c44d51ef
+# rust:1.59-alpine3.15
+RBSPY_RUST_BUILDER_VERSION=@sha256:65b63b7d003f7a492cc8e550a4830aaa1f4155b74387549a82985c8efb3d0e88
 # perf - ubuntu:18.04 (for older glibc, to support older kernels)
 UBUNTU_VERSION_1804=@sha256:dca176c9663a7ba4c1f0e710986f5a25e672842963d95b960191e2d9f7185ebe
 # phpspy & pyperf - ubuntu:20.04
@@ -59,7 +61,8 @@ NODE_PACKAGE_BUILDER_GLIBC=centos/devtoolset-7-toolchain-centos7@sha256:24d4c230
 
 mkdir -p build/x86_64
 docker buildx build -f executable.Dockerfile --output type=local,dest=build/x86_64/ \
-    --build-arg RUST_BUILDER_VERSION=$RUST_BUILDER_VERSION \
+    --build-arg RBSPY_RUST_BUILDER_VERSION=$RBSPY_RUST_BUILDER_VERSION \
+    --build-arg PYSPY_RUST_BUILDER_VERSION=$PYSPY_RUST_BUILDER_VERSION \
     --build-arg PYPERF_BUILDER_UBUNTU=$UBUNTU_VERSION \
     --build-arg PERF_BUILDER_UBUNTU=$UBUNTU_VERSION_1804 \
     --build-arg PHPSPY_BUILDER_UBUNTU=$UBUNTU_VERSION \
