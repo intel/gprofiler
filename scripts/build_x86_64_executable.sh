@@ -30,8 +30,8 @@ else
     with_proxy=""
 fi
 
-# pyspy & rbspy, using the same builder for both pyspy and rbspy since they share build dependencies - rust:1.59-alpine3.15
-RUST_BUILDER_VERSION=@sha256:65b63b7d003f7a492cc8e550a4830aaa1f4155b74387549a82985c8efb3d0e88
+# pyspy & rbspy, using the same builder for both pyspy and rbspy since they share build dependencies - rust:1.86.0-alpine3.21
+RUST_BUILDER_VERSION=@sha256:541a1720c1cedddae9e17b4214075bf57c20bc7b176b4bba6bce3437c44d51ef
 # perf - ubuntu:18.04 (for older glibc, to support older kernels)
 UBUNTU_VERSION_1804=@sha256:dca176c9663a7ba4c1f0e710986f5a25e672842963d95b960191e2d9f7185ebe
 # phpspy & pyperf - ubuntu:20.04
