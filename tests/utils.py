@@ -340,6 +340,9 @@ def ensure_all_access_recursive(path: Union[str, Path]) -> None:
             os.chmod(
                 full_path,
                 stat.S_IRUSR
+                | stat.S_IXGRP
+                | stat.S_IXUSR
+                | stat.S_IXGRP
                 | stat.S_IWUSR
                 | stat.S_IRGRP  # owner
                 | stat.S_IWGRP
@@ -348,7 +351,18 @@ def ensure_all_access_recursive(path: Union[str, Path]) -> None:
             )  # others
 
     # Also apply to the top-level directory
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+    os.chmod(
+        path,
+        stat.S_IRUSR
+        | stat.S_IWUSR
+        | stat.S_IRGRP
+        | stat.S_IWGRP
+        | stat.S_IROTH
+        | stat.S_IWOTH
+        | stat.S_IXGRP
+        | stat.S_IXUSR
+        | stat.S_IXGRP,
+    )
 
 
 @contextmanager
