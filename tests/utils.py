@@ -46,7 +46,6 @@ from gprofiler.profilers.java import (
 )
 from gprofiler.profilers.profiler_base import ProfilerInterface
 from gprofiler.utils import remove_path, wait_event
-from tests import CONTAINERS_DIRECTORY
 
 RUNTIME_PROFILERS = [
     ("java", "ap"),
@@ -373,11 +372,9 @@ def _application_process(command_line: List[str], check_app_exited: bool) -> Ite
         os.setuid(1000)
 
     # This is required in order to make sure that the user has permissions to run what it needs to run in tests...
-    ensure_all_access_recursive(CONTAINERS_DIRECTORY)
+    # ensure_all_access_recursive(CONTAINERS_DIRECTORY)
 
-    popen = subprocess.Popen(
-        command_line, preexec_fn=lower_privs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/tmp"
-    )
+    popen = subprocess.Popen(command_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/tmp")
     try:
         # wait 2 seconds to ensure it starts
         popen.wait(2)
