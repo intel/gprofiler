@@ -13,6 +13,7 @@ retry() {
   if [[ $exit_code -ne 0 && $retries -gt 0 ]]; then
     echo "⚠️  $command failed with exit code $exit_code, retrying..."
     retry $((retries - 1)) "$command"
+    exit_code=$?
   elif [[ $exit_code -ne 0 ]]; then
     echo "❌ $command failed after retries."
   fi

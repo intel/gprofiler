@@ -21,15 +21,19 @@ retry() {
   local retries="$1"
   local command="$2"
 
-  bash -c "$command"
+  echo "→ Running: $command (retries left: $retries)"
+  eval "$command"
   local exit_code=$?
 
   if [[ $exit_code -ne 0 && $retries -gt 0 ]]; then
-    echo "$command failed with $exit_code"
+    echo "⚠️  $command failed with exit code $exit_code, retrying..."
     retry $((retries - 1)) "$command"
-  else
-    return $exit_code
+    exit_code=$?
+  elif [[ $exit_code -ne 0 ]]; then
+    echo "❌ $command failed after retries."
   fi
+
+  return $exit_code
 }
 
 apt-get update
