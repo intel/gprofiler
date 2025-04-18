@@ -227,7 +227,7 @@ def application_process(
     else:
         if is_aarch64():
             if runtime == "dotnet":
-                pytest.xfail("This combination fails on aarch64, see https://github.com/Granulate/gprofiler/issues/755")
+                pytest.xfail("This combination fails on aarch64, see https://github.com/intel/gprofiler/issues/755")
         with _application_process(command_line, check_app_exited) as popen:
             yield popen
 
@@ -387,14 +387,14 @@ def application_docker_image(
     if is_aarch64():
         if runtime == "nodejs":
             if application_image_tag == "12-glibc":
-                pytest.xfail("This test fails on aarch64, see https://github.com/Granulate/gprofiler/issues/758")
+                pytest.xfail("This test fails on aarch64, see https://github.com/intel/gprofiler/issues/758")
         if runtime == "java":
             if application_image_tag == "j9" or application_image_tag == "zing":
                 pytest.xfail(
-                    "Different JVMs are not supported on aarch64, see https://github.com/Granulate/gprofiler/issues/717"
+                    "Different JVMs are not supported on aarch64, see https://github.com/intel/gprofiler/issues/717"
                 )
             if application_image_tag == "musl":
-                pytest.xfail("This test does not work on aarch64 https://github.com/Granulate/gprofiler/issues/743")
+                pytest.xfail("This test does not work on aarch64 https://github.com/intel/gprofiler/issues/743")
     yield build_image(docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)])
 
 

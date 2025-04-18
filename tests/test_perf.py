@@ -65,13 +65,13 @@ def test_perf_fp_dwarf_smart(
 ) -> None:
     if is_aarch64():
         if runtime == "native_fp" and perf_mode == "fp":
-            pytest.xfail("This combination fails on aarch64 https://github.com/Granulate/gprofiler/issues/746")
+            pytest.xfail("This combination fails on aarch64 https://github.com/intel/gprofiler/issues/746")
         if runtime == "native_fp" and perf_mode == "dwarf":
-            pytest.xfail("This combination fails on aarch64 https://github.com/Granulate/gprofiler/issues/746")
+            pytest.xfail("This combination fails on aarch64 https://github.com/intel/gprofiler/issues/746")
         if runtime == "native_dwarf" and perf_mode == "smart":
-            pytest.xfail("This combination fails on aarch64 https://github.com/Granulate/gprofiler/issues/746")
+            pytest.xfail("This combination fails on aarch64 https://github.com/intel/gprofiler/issues/746")
         if runtime == "native_dwarf" and perf_mode == "dwarf":
-            pytest.xfail("This combination fails on aarch64 https://github.com/Granulate/gprofiler/issues/746")
+            pytest.xfail("This combination fails on aarch64 https://github.com/intel/gprofiler/issues/746")
     with system_profiler as profiler:
         process_profile = snapshot_pid_profile(profiler, application_pid)
         process_collapsed = process_profile.stacks
@@ -268,7 +268,7 @@ def test_perf_restarted_if_killed(
         (["d_[k];e_[k] 1"], 0),
         (["a;b;c;d_[k] 1"], 3),
         # Tests if unknown frames are ignored when calculating avg frame count
-        # https://github.com/Granulate/gprofiler/issues/798
+        # https://github.com/intel/gprofiler/issues/798
         (["[unknown];[unknown];[unknown];a;b;c;d_[k] 1"], 3),
         (["a;b;c;d_[k];e_[k] 1"], 3),
         (["a 1", "a;b 1"], 1.5),

@@ -113,7 +113,7 @@ class PythonEbpfProfiler(ProfilerBase):
         to verify those conditions stand anyway (and during our tests - we run gProfiler's executable
         in a container, so these steps have to run)
         """
-        # see explanation in https://github.com/Granulate/gprofiler/issues/443#issuecomment-1229515568
+        # see explanation in https://github.com/intel/gprofiler/issues/443#issuecomment-1229515568
         assert is_running_in_init_pid(), "PyPerf must run in init PID NS!"
 
         # increase memlock (Docker defaults to 64k which is not enough for the get_offset programs)
@@ -302,7 +302,7 @@ class PythonEbpfProfiler(ProfilerBase):
         for pid in parsed:
             try:
                 process = Process(pid)
-                # Because of https://github.com/Granulate/gprofiler/issues/764,
+                # Because of https://github.com/intel/gprofiler/issues/764,
                 # for now we only filter output of pyperf to return only profiles from chosen pids
                 if self._profiler_state.processes_to_profile is not None:
                     if process not in self._profiler_state.processes_to_profile:

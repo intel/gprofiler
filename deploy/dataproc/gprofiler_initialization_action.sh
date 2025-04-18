@@ -38,7 +38,7 @@ if [[ "$SPARK_METRICS" == "1" ]]; then
 	flags="$flags --collect-spark-metrics"
 fi
 
-wget --no-verbose "https://github.com/Granulate/gprofiler/releases/latest/download/gprofiler_$(uname -m)" -O gprofiler
+wget --no-verbose "https://github.com/intel/gprofiler/releases/latest/download/gprofiler_$(uname -m)" -O gprofiler
 sudo chmod +x gprofiler
 sudo sh -c "setsid ./gprofiler -cu --token='$GPROFILER_TOKEN' --service-name='$GPROFILER_SERVICE' $flags $OUTPUT_REDIRECTION &"
 echo "gProfiler installed successfully."

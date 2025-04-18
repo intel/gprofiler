@@ -172,7 +172,7 @@ def test_java_async_profiler_cpu_mode(
     Run Java in a container and enable async-profiler in CPU mode, make sure we get kernel stacks.
     """
     if is_aarch64():
-        pytest.xfail("This test is not working on aarch64 https://github.com/Granulate/gprofiler/issues/723")
+        pytest.xfail("This test is not working on aarch64 https://github.com/intel/gprofiler/issues/723")
     with make_java_profiler(
         profiler_state,
         frequency=999,
@@ -410,7 +410,7 @@ def test_sanity_other_jvms(
 ) -> None:
     if is_aarch64() and application_image_tag in ("j9", "zing"):
         pytest.xfail(
-            "Different JVMs are not supported on aarch64, see https://github.com/Granulate/gprofiler/issues/717"
+            "Different JVMs are not supported on aarch64, see https://github.com/intel/gprofiler/issues/717"
         )
 
     with make_java_profiler(
@@ -1175,7 +1175,7 @@ def test_collect_cmdline_and_env_jvm_flags(
     """
     if is_aarch64():
         pytest.xfail(
-            "Different jvm flags are not supported on aarch64, see https://github.com/Granulate/gprofiler/issues/717"
+            "Different jvm flags are not supported on aarch64, see https://github.com/intel/gprofiler/issues/717"
         )
     with make_java_profiler(profiler_state, java_collect_jvm_flags="SelfDestructTimer,PrintCodeCache") as profiler:
         # When running a container manually we can't use application_pid fixture as it will come from the fixture

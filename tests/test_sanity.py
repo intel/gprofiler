@@ -94,7 +94,7 @@ def test_phpspy(
     profiler_state: ProfilerState,
 ) -> None:
     if not in_container:
-        pytest.skip("Flaky https://github.com/Granulate/gprofiler/issues/630")
+        pytest.skip("Flaky https://github.com/intel/gprofiler/issues/630")
 
     with PHPSpyProfiler(
         1000,
@@ -164,7 +164,7 @@ def test_python_ebpf(
 ) -> None:
     if is_aarch64():
         pytest.skip(
-            "PyPerf doesn't support aarch64 architecture, see https://github.com/Granulate/gprofiler/issues/499"
+            "PyPerf doesn't support aarch64 architecture, see https://github.com/intel/gprofiler/issues/499"
         )
 
     _ = assert_app_id  # Required for mypy unused argument warning
@@ -208,16 +208,16 @@ def test_from_container(
     in_container: bool,
 ) -> None:
     if profiler_type == "pyperf" and is_aarch64():
-        pytest.xfail("PyPerf doesn't run on Aarch64 - https://github.com/Granulate/gprofiler/issues/499")
+        pytest.xfail("PyPerf doesn't run on Aarch64 - https://github.com/intel/gprofiler/issues/499")
     if runtime == "php" and not in_container:
         pytest.skip(
-            "Flaky https://github.com/Granulate/gprofiler/issues/630 and issue"
-            " with phpspy grep: https://github.com/Granulate/gprofiler/issues/794"
+            "Flaky https://github.com/intel/gprofiler/issues/630 and issue"
+            " with phpspy grep: https://github.com/intel/gprofiler/issues/794"
         )
     elif runtime == "php":
-        pytest.xfail("Issue with phpspy grep https://github.com/Granulate/gprofiler/issues/794")
+        pytest.xfail("Issue with phpspy grep https://github.com/intel/gprofiler/issues/794")
     if runtime == "dotnet":
-        pytest.xfail("Dotnet-trace doesn't work with alpine: https://github.com/Granulate/gprofiler/issues/795")
+        pytest.xfail("Dotnet-trace doesn't work with alpine: https://github.com/intel/gprofiler/issues/795")
 
     _ = application_pid  # Fixture only used for running the application.
     _ = assert_app_id  # Required for mypy unused argument warning
@@ -287,7 +287,7 @@ def test_container_name_when_stopped(
 ) -> None:
     """
     Tests that container name is added to data even when container stops during profiling.
-    Related issue: https://github.com/Granulate/gprofiler/issues/640
+    Related issue: https://github.com/intel/gprofiler/issues/640
     """
     profiler_flags.extend(["-d", "20"])
     container = start_gprofiler_in_container_for_one_session(

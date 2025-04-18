@@ -229,7 +229,7 @@ def reap_process(process: Popen) -> Tuple[int, bytes, bytes]:
     Safely reap a process. This function expects the process to be exited or exiting.
     It uses communicate() instead of wait() to avoid the possible deadlock in wait()
     (see https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait, and see
-    ticket https://github.com/Granulate/gprofiler/issues/744).
+    ticket https://github.com/intel/gprofiler/issues/744).
     """
     stdout, stderr = process.communicate()
     returncode = process.poll()
