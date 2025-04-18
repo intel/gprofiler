@@ -335,7 +335,7 @@ def ensure_all_access_recursive(path: Union[str, Path]) -> None:
     for root, dirs, files in os.walk(path):
         for name in dirs + files:
             full_path = os.path.join(root, name)
-
+            print(f"Setting permissions for {full_path}")
             # Set permissions: read/write for user, group, and others
             os.chmod(
                 full_path,
