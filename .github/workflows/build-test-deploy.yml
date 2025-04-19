@@ -242,6 +242,11 @@ jobs:
         # same version as used in tests/containers/nodejs/Dockerfile
         node-version: 10.x
 
+    - name: Install Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: 3.0.2
+
     - name: Checkout Code
       uses: actions/checkout@v3
       with:
