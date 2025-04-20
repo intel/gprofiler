@@ -291,7 +291,8 @@ def test_hotspot_error_file(
     assert "OpenJDK" in log_extras["hs_err"]
     assert "SIGBUS" in log_extras["hs_err"]
     if not is_aarch64():
-        assert "libpthread.so" in log_extras["hs_err"]
+        # Threading symbols moved to libc.so after some glibc version.
+        assert any(lib in log_extras["hs_err"] for lib in ("libpthread.so", "libc.so"))
         assert "memory_usage_in_bytes:" in log_extras["hs_err"]
     assert "Java profiling has been disabled, will avoid profiling any new java process" in caplog.text
     assert profiler._safemode_disable_reason is not None

@@ -232,7 +232,7 @@ jobs:
     - name: Install Java
       uses: actions/setup-java@v1
       with:
-        java-version: '8.0.275'
+        java-version: '8.0.382+5'
         java-package: jdk
         architecture: x64
 

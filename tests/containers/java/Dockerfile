@@ -1,5 +1,5 @@
-# openjdk:8u332
-ARG JAVA_BASE_IMAGE=openjdk@sha256:b5dfe8c78614fb242b7b3d4f16ed375cd03023e8280d5eeb01fec75ba924f864
+# eclipse-temurin:8u442-b06-jdk
+ARG JAVA_BASE_IMAGE=eclipse-temurin@sha256:3a980a2ea5d03252cc2fb84d6bb6f6fd2a0305a15f01a4185077b9fe26bad8f7
 FROM ${JAVA_BASE_IMAGE}
 
 WORKDIR /app
