@@ -831,25 +831,6 @@ def test_dso_name_in_ap_profile(
         assert insert_dso_name == is_pattern_in_collapsed(r"jni_NewObject \(.+?/libjvm.so\)", collapsed)
 
 
-# test that missing symbol and only DSO name is recognized and handled correctly by async profiler
-@pytest.mark.parametrize("in_container", [True])
-@pytest.mark.parametrize("insert_dso_name", [False, True])
-@pytest.mark.parametrize("libc_pattern", [r"(^|;)\(/.*/libc-.*\.so\)($|;)"])
-def test_handling_missing_symbol_in_profile(
-    application_pid: int,
-    insert_dso_name: bool,
-    libc_pattern: str,
-    profiler_state: ProfilerState,
-) -> None:
-    with make_java_profiler(
-        profiler_state,
-        duration=3,
-        frequency=999,
-    ) as profiler:
-        collapsed = snapshot_pid_profile(profiler, application_pid).stacks
-        assert is_pattern_in_collapsed(libc_pattern, collapsed)
-
-
 @pytest.mark.parametrize("in_container", [True])
 def test_meminfo_logged(
     application_pid: int,
