@@ -88,8 +88,8 @@ from tests.utils import assert_jvm_flags_equal, is_aarch64, load_metadata, run_g
                 "exe": "/opt/java/openjdk/bin/java",
                 "execfn": "/opt/java/openjdk/bin/java",
                 "java_version": 'openjdk version "1.8.0_442"\n'
-                                "OpenJDK Runtime Environment (Temurin)(build 1.8.0_442-b06)\n"
-                                "OpenJDK 64-Bit Server VM (Temurin)(build 25.442-b06, mixed mode)",
+                "OpenJDK Runtime Environment (Temurin)(build 1.8.0_442-b06)\n"
+                "OpenJDK 64-Bit Server VM (Temurin)(build 25.442-b06, mixed mode)",
                 "libjvm_elfid": (
                     "sha1:365c41ba70ca9ca7350e8ea01d36149aa59be1fd"
                     if is_aarch64()
