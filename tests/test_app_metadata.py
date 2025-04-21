@@ -85,15 +85,15 @@ from tests.utils import assert_jvm_flags_equal, is_aarch64, load_metadata, run_g
             "ap",
             None,
             {
-                "exe": "/usr/local/openjdk-8/bin/java",
-                "execfn": "/usr/local/openjdk-8/bin/java",
-                "java_version": 'openjdk version "1.8.0_322"\n'
-                "OpenJDK Runtime Environment (build 1.8.0_322-b06)\n"
-                "OpenJDK 64-Bit Server VM (build 25.322-b06, mixed mode)",
+                "exe": "/opt/java/openjdk/bin/java",
+                "execfn": "/opt/java/openjdk/bin/java",
+                "java_version": 'openjdk version "1.8.0_442"\n'
+                                "OpenJDK Runtime Environment (Temurin)(build 1.8.0_442-b06)\n"
+                                "OpenJDK 64-Bit Server VM (Temurin)(build 25.442-b06, mixed mode)",
                 "libjvm_elfid": (
-                    "buildid:33a1021cade63f16e30726be4111f20c34444764"
+                    "sha1:365c41ba70ca9ca7350e8ea01d36149aa59be1fd"
                     if is_aarch64()
-                    else "buildid:622795512a2c037aec4d7ca6da05527dae86e460"
+                    else "sha1:98f27ec5da9c28d36a110cac36669f3cf4a8d9d1"
                 ),
                 "arch": platform.machine(),
                 "jvm_flags": [
