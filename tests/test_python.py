@@ -163,9 +163,7 @@ def test_dso_name_in_pyperf_profile(
     profiler_state: ProfilerState,
 ) -> None:
     if is_aarch64() and profiler_type == "pyperf":
-        pytest.skip(
-            "PyPerf doesn't support aarch64 architecture, see https://github.com/intel/gprofiler/issues/499"
-        )
+        pytest.skip("PyPerf doesn't support aarch64 architecture, see https://github.com/intel/gprofiler/issues/499")
 
     with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
         profile = snapshot_pid_profile(profiler, application_pid)

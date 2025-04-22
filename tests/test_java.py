@@ -409,9 +409,7 @@ def test_sanity_other_jvms(
     application_image_tag: str,
 ) -> None:
     if is_aarch64() and application_image_tag in ("j9", "zing"):
-        pytest.xfail(
-            "Different JVMs are not supported on aarch64, see https://github.com/intel/gprofiler/issues/717"
-        )
+        pytest.xfail("Different JVMs are not supported on aarch64, see https://github.com/intel/gprofiler/issues/717")
 
     with make_java_profiler(
         profiler_state,
