@@ -158,8 +158,8 @@ def _get_libpython_path(process: Process) -> Optional[str]:
 
 
 # Matches PY_VERSION in Python's binary
-# Notice that we'll match only 2.7 and 3.5-3.12
-_PY_VERSION_STRING_PATTERN = re.compile(rb"(?<=\D)(?:2\.7|3\.(?:[5-9]|1[0-2]))\.\d\d?(?=\x00)")
+# Notice that we'll match only 2.7 and 3.5-3.13
+_PY_VERSION_STRING_PATTERN = re.compile(rb"(?<=\D)(?:2\.7|3\.(?:[5-9]|1[0-3]))\.\d\d?(?=\x00)")
 
 
 @functools.lru_cache(maxsize=128)
