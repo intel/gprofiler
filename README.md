@@ -3,7 +3,7 @@ gProfiler combines multiple sampling profilers to produce unified visualization 
 what your CPU is spending time on, displaying stack traces of all processes running on your system
 across native programs<sup id="a1">[1](#perf-native)</sup> (includes Golang), Java and Python runtimes, and kernel routines.
 
-gProfiler can upload its results to the [Granulate Performance Studio](https://profiler.granulate.io/) or to a [self hosted studio](https://github.com/intel/gprofiler-performance-studio), which aggregates the results from different instances over different periods of time and can give you a holistic view of what is happening on your entire cluster.
+gProfiler can upload its results to a [self hosted studio](https://github.com/Granulate/gprofiler-performance-studio), which aggregates the results from different instances over different periods of time and can give you a holistic view of what is happening on your entire cluster.
 To upload results, you will have to register and generate a token on the website.
 
 gProfiler runs on Linux (on x86_64 and Aarch64; Aarch64 support is not complete yet and not all runtime profilers are supported, see [architecture support](#architecture-support)).
@@ -36,7 +36,7 @@ gProfiler can produce output in two ways:
 
   Use the `--upload-results`/`-u` flag. Pass the `--token` option to specify the token
   provided by Granulate Performance Studio, and the `--service-name` option to specify an identifier
-  for the collected profiles, as will be viewed in the [Granulate Performance Studio](https://profiler.granulate.io/). *Profiles sent from numerous
+  for the collected profiles, as will be viewed in a self hosted studio. *Profiles sent from numerous
   gProfilers using the same service name will be aggregated together.*
 
 Note: both flags can be used simultaneously, in which case gProfiler will create the local files *and* upload
@@ -44,7 +44,7 @@ the results.
 
 ### Network requirements
 
-When `--upload-results` is used, gProfiler will communicate with `https://profiler.granulate.io` and `https://api.granulate.io`. Make sure those domains are accessible for HTTPS access. Additionally, if you download gProfiler from the GitHub releases you'll need `https://github.com`, or if you use the Docker image you'll need the Docker registry accessible (`https://index.docker.io` by default).
+When `--upload-results` is used, gProfiler will communicate with a self hosted studio. Make sure those domains are accessible for HTTPS access. Additionally, if you download gProfiler from the GitHub releases you'll need `https://github.com`, or if you use the Docker image you'll need the Docker registry accessible (`https://index.docker.io` by default).
 
 If you [require an HTTPS proxy](#Using-HTTP-proxies), make sure the proxy has those domains whitelisted.
 
@@ -262,7 +262,7 @@ This is done by creating a `Role` that's allowed to use the `privileged` SCC, th
 - Scroll to the bottom of the page, and click `Configure via JSON` \
 ![Configure via JSON button](https://user-images.githubusercontent.com/74833655/132983629-163fdb87-ec9a-4201-b557-e0ae441e2595.png)
 - Replace the JSON contents with the contents of the [gprofiler_task_definition.json](deploy/ecs/gprofiler_task_definition.json) file and **Make sure you change the following values**:
-  - Replace `<TOKEN>` in the command line with your token you got from the [gProfiler Performance Studio](https://profiler.granulate.io/) site.
+  - Replace `<TOKEN>` in the command line with your token you got from a self hosted studio site.
   - Replace `<SERVICE NAME>` in the command line with the service name you wish to use.
 - **Note** - if you wish to see the logs from the gProfiler service, be sure to follow [AWS's guide](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_awslogs.html#create_awslogs_loggroups)
   on how to auto-configure logging, or to set it up manually yourself.
@@ -303,7 +303,7 @@ So in order to deploy gProfiler, we need to modify a container definition to inc
     For example, if your default `command` is `["python", "/path/to/my/app.py"]`, we will now change it to: `["-c", "(wget https://github.com/intel/gprofiler/releases/latest/download/gprofiler -O /tmp/gprofiler; chmod +x /tmp/gprofiler; /tmp/gprofiler -cu --token=<TOKEN> --service-name=<SERVICE NAME>) & python /path/to/my/app.py"]`.
 
     Make sure to:
-    - Replace `<TOKEN>` in the command line with your token you got from the [gProfiler Performance Studio](https://profiler.granulate.io/) site.
+    - Replace `<TOKEN>` in the command line with your token you got from a self hosted studio site.
     - Replace `<SERVICE NAME>` in the command line with the service name you wish to use.
 
     This new command will start the downloading of gProfiler in the background, then run your application. Make sure to JSON-escape any characters in your command line! For example, `"` are replaced with `\"`.
@@ -331,7 +331,7 @@ Alternatively, you can download gProfiler in your `Dockerfile` to avoid having t
 ## Running as a docker-compose service
 You can run a gProfiler container with `docker-compose` by using the template file in [docker-compose.yml](deploy/docker-compose/docker-compose.yml).
 Start by replacing the `<TOKEN>` and `<SERVICE NAME>` with values in the `command` section -
-* `<TOKEN>` should be replaced with your personal token from the [gProfiler Performance Studio](https://profiler.granulate.io/) site (in the [Install Service](https://profiler.granulate.io/installation) section)
+* `<TOKEN>` should be replaced with your personal token from a self hosted studio site
 * The `<SERVICE NAME>` should be replaced with whatever service name you wish to use
 
 Optionally, you can add more command line arguments to the `command` section. For example, if you wish to use the `py-spy` profiler, you can add `--python-mode pyspy` to the commandline.
@@ -359,14 +359,14 @@ gcloud dataproc clusters create <CLUSTER NAME> \
 --metadata gprofiler-token="$TOKEN",gprofiler-service="$SERVICE",enable-stdout="1" --region <REGION>
 ```
 **Note** - make sure to replace the placeholders with the appropriate values -
-  - Replace `<TOKEN>` in the command line with your token you got from the [gProfiler Performance Studio](https://profiler.granulate.io/installation) site.
+  - Replace `<TOKEN>` in the command line with your token you got from a self hosted studio site.
   - Replace `<SERVICE NAME>` in the command line with the service name you wish to use.
   - Replace `<YOUR BUCKET>` with the bucket name you have uploaded the gProfiler initialization action script to.
   - Replace `<CLUSTER NAME>` with the cluster name you wish to use
   - Replace `<REGION>` with the region you wish to use
 
 ### Debugging problems
-If you are experiencing issues with your gProfiler installation (such as no flamegraphs available in the [Performance Studio](https://profiler.granulate.io)
+If you are experiencing issues with your gProfiler installation (such as no flamegraphs available in a self hosted studio)
 after waiting for more than 1 hour) you can look at gProfiler's logs and see if there are any errors. \
 To see gProfiler's logs, you must enable its output by providing `enable-stdout="1"` in the cluster metadata when creating the Dataproc cluster. You can use the example above.
 Wait at least 10 minutes after creating your cluster, and then you can SSH into one of your cluster instances via either Dataproc's web interface or the command line.
@@ -394,7 +394,7 @@ node when the cluster is provisioned. You will need to provide the token and ser
 
    In the steps below, make sure to:
      - Replace `<BUCKET>` with the bucket where `gprofiler_action.sh` was uploaded.
-     - Replace `<TOKEN>` with the token you got from the [gProfiler Performance Studio](https://profiler.granulate.io/installation) site.
+     - Replace `<TOKEN>` with the token you got from a self hosted studio site.
      - Replace `<SERVICE>` with the service name you wish to use.
 
    With AWS CLI:
