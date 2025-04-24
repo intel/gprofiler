@@ -44,7 +44,7 @@ eval "$(pyenv init - bash)"
 eval "$(pyenv virtualenv-init -)"
 pyenv global 3.10
 
-git clone --depth 1 -b feature/update-offsets-for-python313 https://github.com/Granulate/bcc.git && cd bcc && git reset --hard b853d3341850c249ee585c59c6c6493ffd49d62f
+git clone --depth 1 -b feature/update-offsets-for-python313 https://github.com/Granulate/bcc.git && cd bcc && git reset --hard 86943faf1f49016646f5857d30d31871e3b27ada
 
 mkdir build
 cd build
