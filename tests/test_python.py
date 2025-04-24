@@ -118,7 +118,7 @@ def test_python_matrix(
         ):
             pytest.xfail("This combination fails, see https://github.com/Granulate/gprofiler/issues/714")
 
-    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
+    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
         profile = snapshot_pid_profile(profiler, application_pid)
 
     collapsed = profile.stacks
@@ -175,7 +175,7 @@ def test_dso_name_in_pyperf_profile(
             "PyPerf doesn't support aarch64 architecture, see https://github.com/Granulate/gprofiler/issues/499"
         )
 
-    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
+    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
         profile = snapshot_pid_profile(profiler, application_pid)
     python_version, _, _ = application_image_tag.split("-")
     interpreter_frame = "PyEval_EvalFrameEx" if python_version == "2.7" else "_PyEval_EvalFrameDefault"
