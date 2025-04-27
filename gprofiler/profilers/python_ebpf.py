@@ -64,7 +64,7 @@ class PythonEbpfProfiler(ProfilerBase):
     _SYMBOLS_MAP_SIZE = 131072
     _DUMP_SIGNAL = signal.SIGUSR2
     _DUMP_TIMEOUT = 5  # seconds
-    _POLL_TIMEOUT = 10  # seconds
+    _POLL_TIMEOUT = 20  # seconds
     _GET_OFFSETS_TIMEOUT = 5  # seconds
     _OUTPUT_READ_SIZE = 65536  # bytes read every cycle from stderr
 
