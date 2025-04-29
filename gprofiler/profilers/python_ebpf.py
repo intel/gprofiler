@@ -63,8 +63,8 @@ class PythonEbpfProfiler(ProfilerBase):
     # 28mb (each symbol is 224 bytes), but needn't be physicall contiguous so don't care
     _SYMBOLS_MAP_SIZE = 131072
     _DUMP_SIGNAL = signal.SIGUSR2
-    _DUMP_TIMEOUT = 30  # seconds
-    _POLL_TIMEOUT = 25  # seconds
+    _DUMP_TIMEOUT = 5  # seconds
+    _POLL_TIMEOUT = 10  # seconds
     _GET_OFFSETS_TIMEOUT = 5  # seconds
     _OUTPUT_READ_SIZE = 65536  # bytes read every cycle from stderr
 
