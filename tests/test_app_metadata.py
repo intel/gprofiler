@@ -36,19 +36,19 @@ from tests.utils import assert_jvm_flags_equal, is_aarch64, load_metadata, run_g
             "pyperf",
             None,
             {
-                "exe": "/usr/local/bin/python3.6",
+                "exe": "/usr/local/bin/python3.10",
                 "execfn": "/usr/local/bin/python",
                 "libpython_elfid": (
-                    "buildid:64b7f8a37ff81f574936de12c263aade340ed3db"
+                    "buildid:08d0c231d1b51904dda230c29f9a277879d8a966"
                     if is_aarch64()
-                    else "buildid:0ef3fce0ef90d8f40ad9236793d30081001ee898"
+                    else "buildid:a0fbcb3dd3173cad741cc59461b2e04faf617731"
                 ),
                 "exe_elfid": (
-                    "buildid:d627b889c0ac0642ea715651ebb7436ce1ee7444"
+                    "buildid:023e54c69bdf16e6ae2ae008bf7831ecc6696e4b"
                     if is_aarch64()
-                    else "buildid:a04b9016e15a247fbc21c91260c13e17a458ed33"
+                    else "buildid:a5c0d6959bf2750616ee9ba872c689aba508ab4f"
                 ),
-                "python_version": "Python 3.6.15",
+                "python_version": "Python 3.10.17",
                 "sys_maxunicode": None,
                 "arch": platform.machine(),
             },
