@@ -22,6 +22,7 @@ from granulate_utils.type_utils import assert_cast
 
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.python import PythonProfiler
+from gprofiler.profilers.python_ebpf import PythonEbpfProfiler
 from tests.conftest import AssertInCollapsed
 from tests.utils import (
     assert_function_in_collapsed,
@@ -118,8 +119,13 @@ def test_python_matrix(
         ):
             pytest.xfail("This combination fails, see https://github.com/Granulate/gprofiler/issues/714")
 
-    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
-        profile = snapshot_pid_profile(profiler, application_pid)
+    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
+        try:
+            profile = snapshot_pid_profile(profiler, application_pid)
+        except TimeoutError:
+            if profiler._ebpf_profiler is not None and profiler._ebpf_profiler.process is not None:
+                PythonEbpfProfiler._check_output(profiler._ebpf_profiler.process, profiler._ebpf_profiler.output_path)
+            raise
 
     collapsed = profile.stacks
 
@@ -134,9 +140,12 @@ def test_python_matrix(
         # we expect to see kernel code
         assert_function_in_collapsed("do_syscall_64_[k]", collapsed)
         # and native user code
-        assert_function_in_collapsed(
-            "PyEval_EvalFrameEx_[pn]" if python_version == "2.7" else "_PyEval_EvalFrameDefault_[pn]", collapsed
-        )
+        if python_version != "3.12":
+            # From some reason _PyEval_EvalFrameDefault_ is not resolved with libunwind on python 3.12.
+            # It wasn't resolved when using gdb to test as well...
+            assert_function_in_collapsed(
+                "PyEval_EvalFrameEx_[pn]" if python_version == "2.7" else "_PyEval_EvalFrameDefault_[pn]", collapsed
+            )
         # ensure class name exists for instance methods
         assert_function_in_collapsed("lister.Burner.burner", collapsed)
         # ensure class name exists for class methods

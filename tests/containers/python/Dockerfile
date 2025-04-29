@@ -1,5 +1,5 @@
-# pinned python:3.6-slim
-FROM python@sha256:2cfebc27956e6a55f78606864d91fe527696f9e32a724e6f9702b5f9602d0474
+# pinned python:3.10-slim
+FROM python@sha256:fc113a90d0a9a41b52f87c973de5b0970ddcccd726d5cd07885ddb5f1f31dd15
 
 WORKDIR /app
 ADD lister.py /app
