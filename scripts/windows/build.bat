@@ -4,7 +4,7 @@ MKDIR app dep 2>NUL
 
 WHERE /Q python
 IF ERRORLEVEL 1 (
-    ECHO python 3.8.10 and above is required to proceed. Exiting...
+    ECHO python 3.10 and above is required to proceed. Exiting...
     EXIT /B -1
 )
 
@@ -21,7 +21,7 @@ FOR /f "tokens=1-2" %%i in ('python --version') do (
         ECHO Python version is valid
     ) ELSE (
         ECHO Found python version: !PYTHON_VERSION!
-        ECHO python 3.8.10 and above is required to proceed. Exiting...
+        ECHO python 3.10 and above is required to proceed. Exiting...
         EXIT /B -1
     )
 )

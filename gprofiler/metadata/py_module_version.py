@@ -57,7 +57,7 @@ def _get_packages_dir(file_path: str) -> Optional[str]:
 def _get_metadata(dist: pkg_resources.Distribution) -> Dict[str, str]:
     """Based on pip._internal.utils.get_metadata"""
     metadata_name = "METADATA"
-    if isinstance(dist, pkg_resources.DistInfoDistribution) and dist.has_metadata(metadata_name):  # type: ignore
+    if isinstance(dist, pkg_resources.DistInfoDistribution) and dist.has_metadata(metadata_name):
         metadata = dist.get_metadata(metadata_name)
     elif dist.has_metadata("PKG-INFO"):
         metadata_name = "PKG-INFO"
@@ -120,7 +120,7 @@ def _files_from_legacy(dist: pkg_resources.Distribution) -> Optional[Iterator[st
         return None
     paths = (p for p in text.splitlines(keepends=False) if p)
     root = dist.location
-    info = dist.egg_info  # type: ignore
+    info = dist.egg_info
     if root is None or info is None:
         return paths
     try:
@@ -158,8 +158,8 @@ def _get_libpython_path(process: Process) -> Optional[str]:
 
 
 # Matches PY_VERSION in Python's binary
-# Notice that we'll match only 2.7 and 3.5-3.12
-_PY_VERSION_STRING_PATTERN = re.compile(rb"(?<=\D)(?:2\.7|3\.(?:[5-9]|1[0-2]))\.\d\d?(?=\x00)")
+# Notice that we'll match only 2.7 and 3.5-3.13
+_PY_VERSION_STRING_PATTERN = re.compile(rb"(?<=\D)(?:2\.7|3\.(?:[5-9]|1[0-3]))\.\d\d?(?=\x00)")
 
 
 @functools.lru_cache(maxsize=128)
@@ -230,8 +230,8 @@ def _populate_packages_versions(packages_versions: Dict[str, Optional[Tuple[str,
     # This function resolves symlinks and makes paths absolute for comparison purposes which isn't required
     # for our usage.
     if hasattr(pkg_resources, "_normalize_cached"):
-        original__normalize_cache = pkg_resources._normalize_cached  # type: ignore
-        pkg_resources._normalize_cached = lambda path: path  # type: ignore
+        original__normalize_cache = pkg_resources._normalize_cached
+        pkg_resources._normalize_cached = lambda path: path
     else:
         global _warned_no__normalized_cached
         if not _warned_no__normalized_cached:
@@ -261,7 +261,7 @@ def _populate_packages_versions(packages_versions: Dict[str, Optional[Tuple[str,
                 packages_versions[module_path] = package_info
     finally:
         # Don't forget to restore the original implementation in case someone else uses this function
-        pkg_resources._normalize_cached = original__normalize_cache  # type: ignore
+        pkg_resources._normalize_cached = original__normalize_cache
 
 
 _exceptions_logged = 0

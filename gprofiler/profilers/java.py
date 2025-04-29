@@ -25,7 +25,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from threading import Event, Lock
 from types import TracebackType
-from typing import Any, Dict, Iterable, List, Optional, Set, Type, TypeVar, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, Type, TypeVar, Union
 
 import psutil
 from granulate_utils.java import (
@@ -350,11 +350,12 @@ def get_java_version(process: Process, stop_event: Event) -> Optional[str]:
     def _run_java_version() -> "CompletedProcess[bytes]":
         return run_process(
             [
-                cast(str, process_java_path),
+                process_java_path,
                 "-version",
             ],
             stop_event=stop_event,
             timeout=_JAVA_VERSION_TIMEOUT,
+            pdeathsigger=False,
         )
 
     # doesn't work without changing PID NS as well (I'm getting ENOENT for libjli.so)

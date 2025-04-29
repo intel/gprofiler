@@ -36,7 +36,7 @@ cd /bpf_get_fs_offset && git reset --hard 8326d39cf44845d4b643ed4267994afca8ccec
 # shellcheck disable=SC2086
 cd /bpf_get_fs_offset && make $LIBBPF_MAKE_FLAGS
 
-cd / && git clone -b v0.0.3 --depth=1 --recurse-submodules https://github.com/Jongy/bpf_get_stack_offset.git
-cd /bpf_get_stack_offset && git reset --hard 54b70ee65708cc8d3d7817277e82376d95205356
+cd / && git clone -b feature/add-support-for-kernel-6.9 --depth=1 --recurse-submodules https://github.com/Granulate/bpf_get_stack_offset.git
+cd /bpf_get_stack_offset && git reset --hard c5526e706c36efea9e2f75ceeb603636cf386ec7
 # shellcheck disable=SC2086
 cd /bpf_get_stack_offset && make $LIBBPF_MAKE_FLAGS

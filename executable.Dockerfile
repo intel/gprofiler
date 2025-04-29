@@ -46,7 +46,8 @@ RUN mv "/tmp/rbspy/target/$(uname -m)-unknown-linux-musl/release/rbspy" /tmp/rbs
 FROM mcr.microsoft.com/dotnet/sdk${DOTNET_BUILDER} as dotnet-builder
 WORKDIR /tmp
 RUN apt-get update && \
-  dotnet tool install --global dotnet-trace --version 6.0.351802
+  dotnet tool install --global dotnet-trace --version 6.0.351802 && \
+  apt-get install -y --no-install-recommends patchelf
 
 RUN cp -r "$HOME/.dotnet" "/tmp/dotnet"
 COPY scripts/dotnet_prepare_dependencies.sh .
@@ -77,11 +78,12 @@ RUN ./phpspy_build.sh
 # async-profiler glibc
 FROM centos${AP_BUILDER_CENTOS} AS async-profiler-builder-glibc
 WORKDIR /tmp
-COPY scripts/async_profiler_env_glibc.sh scripts/fix_centos7.sh ./
+COPY scripts/async_profiler_env_glibc.sh scripts/fix_centos7.sh scripts/pdeathsigger.c ./
 RUN if grep -q "CentOS Linux 7" /etc/os-release ; then \
       ./fix_centos7.sh; \
     fi
-RUN ./async_profiler_env_glibc.sh
+RUN ./async_profiler_env_glibc.sh && \
+    gcc -static -o pdeathsigger pdeathsigger.c
 
 COPY scripts/async_profiler_build_shared.sh .
 RUN ./async_profiler_build_shared.sh
@@ -124,7 +126,6 @@ COPY --from=perf-builder /bpftool /bpftool
 
 WORKDIR /bcc
 COPY scripts/staticx_for_pyperf_patch.diff .
-COPY scripts/staticx_patch.diff .
 COPY scripts/bcc_helpers_build.sh .
 COPY scripts/pyperf_env.sh .
 RUN ./pyperf_env.sh --with-staticx
@@ -177,6 +178,7 @@ WORKDIR /app
 RUN yum --setopt=skip_missing_names_on_install=False install -y \
         gcc \
         curl \
+        glibc-static \
         libicu && \
     yum clean all
 
@@ -190,10 +192,6 @@ RUN set -e; \
 RUN set -e; \
     if [ "$(uname -m)" = "aarch64" ]; then \
          ln -s /usr/lib64/python3.10/lib-dynload /usr/lib/python3.10/lib-dynload; \
-    fi
-RUN set -e; \
-    if [ "$(uname -m)" = "aarch64" ]; then \
-        python3 -m pip install --no-cache-dir 'wheel==0.37.0' 'scons==4.2.0'; \
     fi
 
 # we want the latest pip
@@ -255,6 +253,7 @@ COPY --from=async-profiler-builder-glibc /usr/bin/xargs gprofiler/resources/php/
 
 COPY --from=async-profiler-builder-glibc /tmp/async-profiler/build/bin/asprof gprofiler/resources/java/asprof
 COPY --from=async-profiler-builder-glibc /tmp/async-profiler/build/async-profiler-version gprofiler/resources/java/async-profiler-version
+COPY --from=async-profiler-builder-glibc /tmp/pdeathsigger gprofiler/resources/pdeathsigger
 COPY --from=async-profiler-centos-min-test-glibc /libasyncProfiler.so gprofiler/resources/java/glibc/libasyncProfiler.so
 COPY --from=async-profiler-builder-musl /tmp/async-profiler/build/lib/libasyncProfiler.so gprofiler/resources/java/musl/libasyncProfiler.so
 COPY --from=node-package-builder-musl /tmp/module_build gprofiler/resources/node/module/musl
@@ -275,15 +274,13 @@ RUN pyinstaller pyinstaller.spec \
     && test -f build/pyinstaller/warn-pyinstaller.txt \
     && ./check_pyinstaller.sh
 
-# for aarch64 - build a patched version of staticx 0.13.6. we remove calls to getpwnam and getgrnam, for these end up doing dlopen()s which
-# crash the staticx bootloader. we don't need them anyway (all files in our staticx tar are uid 0 and we don't need the names translation)
-COPY scripts/staticx_patch.diff staticx_patch.diff
+# We need staticx main as version wasn't released yet for PyInstaller hooks throwing on non elfs.
+# Removed build isolation as from some reason there's an issue with scons on the isolated env.
 # hadolint ignore=DL3003
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        git clone -b v0.13.6 https://github.com/JonathonReinhart/staticx.git && \
+        git clone  https://github.com/Granulate/staticx.git && \
         cd staticx && \
-        git reset --hard 819d8eafecbaab3646f70dfb1e3e19f6bbc017f8 && \
-        git apply ../staticx_patch.diff && \
+        git checkout 33eefdadc72832d5aa67c0792768c9e76afb746d && \
         ln -s libnss_files.so.2 /lib64/libnss_files.so && \
         ln -s libnss_dns.so.2 /lib64/libnss_dns.so && \
         python3 -m pip install --no-cache-dir . ; \

@@ -1,5 +1,5 @@
-# pinned python:3.6-slim
-FROM python@sha256:2cfebc27956e6a55f78606864d91fe527696f9e32a724e6f9702b5f9602d0474
+# pinned python:3.10-slim - If this is updated make sure to update tests/test_app_metadata.py with new metadata.
+FROM python@sha256:6a59e30de500f8ea1e673b88cd7a558f4d642ed4ec8e574d79380380adc3aed4
 
 WORKDIR /app
 ADD lister.py /app

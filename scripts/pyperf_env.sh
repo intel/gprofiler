@@ -40,7 +40,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     iperf llvm-12-dev \
     clang-12 libclang-12-dev \
     cmake \
-    python3 python3-pip \
     flex \
     libfl-dev \
     bison \
@@ -49,21 +48,48 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     liblzma-dev \
     ca-certificates \
     git \
-    patchelf scons
+    patchelf \
+    make \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    wget \
+    llvm \
+    libncurses5-dev \
+    libncursesw5-dev \
+    xz-utils \
+    tk-dev \
+    libffi-dev \
+    liblzma-dev \
+    python-openssl
+
+# Install specific python version.
+curl -fsSL https://pyenv.run | bash
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
+eval "$(pyenv virtualenv-init -)"
+
+pyenv install 3.10
+pyenv global 3.10
 
 if [ -n "$with_staticx" ]; then
     if [ "$(uname -m)" = "aarch64" ]; then
         exit 0;
     fi
-    git clone -b v0.13.6 https://github.com/JonathonReinhart/staticx.git
+    python3 -m pip install --upgrade pip
+    python3 -m pip install --upgrade setuptools
+    git clone https://github.com/Granulate/staticx.git
+
     # We're using staticx to build a distribution-independent binary of PyPerf because PyPerf
     # can only build with latest llvm (>10), which cannot be obtained on CentOS.
     cd staticx
-    git reset --hard 819d8eafecbaab3646f70dfb1e3e19f6bbc017f8
+    git checkout 33eefdadc72832d5aa67c0792768c9e76afb746d # After fixing build deps
     # - apply patch to ensure staticx bootloader propagates dump signal to actual PyPerf binary
-    # - apply patch removing calls to getpwnam and getgrnam,
     # to avoid crashing the staticx bootloader on ubuntu:22.04+ and centos:8+
-    git apply ../staticx_for_pyperf_patch.diff ../staticx_patch.diff
+    git apply ../staticx_for_pyperf_patch.diff
     python3 -m pip install --no-cache-dir .
     cd ..
     rm -rf staticx
@@ -73,3 +99,4 @@ fi
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
+

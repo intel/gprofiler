@@ -87,7 +87,7 @@ def chdir(path: Path) -> Iterator[None]:
 
 @fixture(params=[False, True], ids=["on_host", "in_container"])
 def in_container(request: FixtureRequest) -> bool:
-    return cast(bool, request.param)  # type: ignore # SubRequest isn't exported yet,
+    return cast(bool, request.param)
     # https://github.com/pytest-dev/pytest/issues/7469
 
 
@@ -272,92 +272,105 @@ def image_name(runtime: str, image_tag: str) -> str:
     return runtime + ("_" + image_tag if image_tag else "")
 
 
+@fixture
+def application_pid(
+    in_container: bool, application_process: subprocess.Popen, application_docker_container: Container
+) -> int:
+    pid: int = application_docker_container.attrs["State"]["Pid"] if in_container else application_process.pid
+    return find_application_pid(pid)
+
+
+runtime_image_listing: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "dotnet": {
+        "": {},
+    },
+    "golang": {
+        "": {},
+    },
+    "java": {
+        "": {},
+        "hotspot-jdk-8": {},  # add for clarity when testing with multiple JDKs
+        "hotspot-jdk-11": dict(buildargs={"JAVA_BASE_IMAGE": "openjdk:11-jdk"}),
+        "j9": dict(buildargs={"JAVA_BASE_IMAGE": "adoptopenjdk/openjdk8-openj9"}),
+        "eclipse-temurin-latest": dict(buildargs={"JAVA_BASE_IMAGE": "eclipse-temurin:latest"}),
+        "zing": dict(dockerfile="zing.Dockerfile"),
+        "musl": dict(dockerfile="musl.Dockerfile"),
+    },
+    "native": {
+        "fp": dict(dockerfile="fp.Dockerfile"),
+        "dwarf": dict(dockerfile="dwarf.Dockerfile"),
+        "change_comm": dict(dockerfile="change_comm.Dockerfile"),
+        "thread_comm": dict(dockerfile="thread_comm.Dockerfile"),
+    },
+    "nodejs": {
+        "": dict(
+            buildargs={
+                "NODE_RUNTIME_FLAGS": "--perf-prof --interpreted-frames-native-stack",
+                "NODE_IMAGE_TAG": "@sha256:59531d2835edd5161c8f9512f9e095b1836f7a1fcb0ab73e005ec46047384911",
+            }
+        ),
+        "without-flags": dict(
+            buildargs={
+                "NODE_RUNTIME_FLAGS": "",
+                "NODE_IMAGE_TAG": "@sha256:59531d2835edd5161c8f9512f9e095b1836f7a1fcb0ab73e005ec46047384911",
+            }
+        ),
+        "10-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":10-slim"}),
+        "10-musl": dict(buildargs={"NODE_IMAGE_TAG": ":10.24.1-alpine"}),
+        "11-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":11-slim"}),
+        "11-musl": dict(buildargs={"NODE_IMAGE_TAG": ":11-alpine"}),
+        "12-glibc": dict(buildargs={"NODE_IMAGE": "centos/nodejs-12-centos7", "NODE_IMAGE_TAG": ":12"}),
+        "12-musl": dict(buildargs={"NODE_IMAGE_TAG": ":12.22.12-alpine"}),
+        "13-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":13-slim"}),
+        "13-musl": dict(buildargs={"NODE_IMAGE_TAG": ":13-alpine"}),
+        "14-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":14-slim"}),
+        "14-musl": dict(buildargs={"NODE_IMAGE_TAG": ":14-alpine"}),
+        "15-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":15-slim"}),
+        "15-musl": dict(buildargs={"NODE_IMAGE_TAG": ":15-alpine"}),
+        "16-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":16-slim"}),
+        "16-musl": dict(buildargs={"NODE_IMAGE_TAG": ":16-alpine"}),
+    },
+    "php": {
+        "": {},
+    },
+    "python": {
+        "": {},
+        "libpython": dict(dockerfile="libpython.Dockerfile"),
+        "2.7-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-slim"}),
+        "2.7-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-alpine"}),
+        "3.5-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.5-slim"}),
+        "3.5-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.5-alpine"}),
+        "3.6-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.6-slim"}),
+        "3.6-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.6-alpine"}),
+        "3.7-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-slim"}),
+        "3.7-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-alpine"}),
+        "3.8-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.8-slim"}),
+        "3.8-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.8-alpine"}),
+        "3.9-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.9-slim"}),
+        "3.9-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.9-alpine"}),
+        "3.10-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.10-slim"}),
+        "3.10-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.10-alpine"}),
+        "3.11-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.11-slim"}),
+        "3.11-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.11-alpine"}),
+        "3.12-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.12-slim"}),
+        "3.12-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.12-alpine"}),
+        "3.13-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.13-slim"}),
+        "3.13-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.13-alpine"}),
+        "2.7-glibc-uwsgi": dict(
+            dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7"}
+        ),  # not slim - need gcc
+        "2.7-musl-uwsgi": dict(dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-alpine"}),
+        "3.7-glibc-uwsgi": dict(
+            dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7"}
+        ),  # not slim - need gcc
+        "3.7-musl-uwsgi": dict(dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-alpine"}),
+    },
+    "ruby": {"": {}},
+}
+
+
 @fixture(scope="session")
 def application_docker_image_configs() -> Mapping[str, Dict[str, Any]]:
-    runtime_image_listing: Dict[str, Dict[str, Dict[str, Any]]] = {
-        "dotnet": {
-            "": {},
-        },
-        "golang": {
-            "": {},
-        },
-        "java": {
-            "": {},
-            "hotspot-jdk-8": {},  # add for clarity when testing with multiple JDKs
-            "hotspot-jdk-11": dict(buildargs={"JAVA_BASE_IMAGE": "openjdk:11-jdk"}),
-            "j9": dict(buildargs={"JAVA_BASE_IMAGE": "adoptopenjdk/openjdk8-openj9"}),
-            "eclipse-temurin-latest": dict(buildargs={"JAVA_BASE_IMAGE": "eclipse-temurin:latest"}),
-            "zing": dict(dockerfile="zing.Dockerfile"),
-            "musl": dict(dockerfile="musl.Dockerfile"),
-        },
-        "native": {
-            "fp": dict(dockerfile="fp.Dockerfile"),
-            "dwarf": dict(dockerfile="dwarf.Dockerfile"),
-            "change_comm": dict(dockerfile="change_comm.Dockerfile"),
-            "thread_comm": dict(dockerfile="thread_comm.Dockerfile"),
-        },
-        "nodejs": {
-            "": dict(
-                buildargs={
-                    "NODE_RUNTIME_FLAGS": "--perf-prof --interpreted-frames-native-stack",
-                    "NODE_IMAGE_TAG": "@sha256:59531d2835edd5161c8f9512f9e095b1836f7a1fcb0ab73e005ec46047384911",
-                }
-            ),
-            "without-flags": dict(
-                buildargs={
-                    "NODE_RUNTIME_FLAGS": "",
-                    "NODE_IMAGE_TAG": "@sha256:59531d2835edd5161c8f9512f9e095b1836f7a1fcb0ab73e005ec46047384911",
-                }
-            ),
-            "10-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":10-slim"}),
-            "10-musl": dict(buildargs={"NODE_IMAGE_TAG": ":10.24.1-alpine"}),
-            "11-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":11-slim"}),
-            "11-musl": dict(buildargs={"NODE_IMAGE_TAG": ":11-alpine"}),
-            "12-glibc": dict(buildargs={"NODE_IMAGE": "centos/nodejs-12-centos7", "NODE_IMAGE_TAG": ":12"}),
-            "12-musl": dict(buildargs={"NODE_IMAGE_TAG": ":12.22.12-alpine"}),
-            "13-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":13-slim"}),
-            "13-musl": dict(buildargs={"NODE_IMAGE_TAG": ":13-alpine"}),
-            "14-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":14-slim"}),
-            "14-musl": dict(buildargs={"NODE_IMAGE_TAG": ":14-alpine"}),
-            "15-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":15-slim"}),
-            "15-musl": dict(buildargs={"NODE_IMAGE_TAG": ":15-alpine"}),
-            "16-glibc": dict(buildargs={"NODE_IMAGE_TAG": ":16-slim"}),
-            "16-musl": dict(buildargs={"NODE_IMAGE_TAG": ":16-alpine"}),
-        },
-        "php": {
-            "": {},
-        },
-        "python": {
-            "": {},
-            "libpython": dict(dockerfile="libpython.Dockerfile"),
-            "2.7-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-slim"}),
-            "2.7-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-alpine"}),
-            "3.5-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.5-slim"}),
-            "3.5-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.5-alpine"}),
-            "3.6-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.6-slim"}),
-            "3.6-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.6-alpine"}),
-            "3.7-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-slim"}),
-            "3.7-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-alpine"}),
-            "3.8-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.8-slim"}),
-            "3.8-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.8-alpine"}),
-            "3.9-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.9-slim"}),
-            "3.9-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.9-alpine"}),
-            "3.10-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.10-slim"}),
-            "3.10-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.10-alpine"}),
-            "3.11-glibc-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.11-slim"}),
-            "3.11-musl-python": dict(dockerfile="matrix.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.11-alpine"}),
-            "2.7-glibc-uwsgi": dict(
-                dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7"}
-            ),  # not slim - need gcc
-            "2.7-musl-uwsgi": dict(dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "2.7-alpine"}),
-            "3.7-glibc-uwsgi": dict(
-                dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7"}
-            ),  # not slim - need gcc
-            "3.7-musl-uwsgi": dict(dockerfile="uwsgi.Dockerfile", buildargs={"PYTHON_IMAGE_TAG": "3.7-alpine"}),
-        },
-        "ruby": {"": {}},
-    }
-
     images = {}
     for runtime, tags_listing in runtime_image_listing.items():
         for tag, kwargs in tags_listing.items():
@@ -509,14 +522,6 @@ def application_factory(
                 yield process.pid
 
     return _run_application
-
-
-@fixture
-def application_pid(
-    in_container: bool, application_process: subprocess.Popen, application_docker_container: Container
-) -> int:
-    pid: int = application_docker_container.attrs["State"]["Pid"] if in_container else application_process.pid
-    return find_application_pid(pid)
 
 
 @fixture

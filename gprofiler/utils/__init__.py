@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import ctypes
+import atexit
 import datetime
 import glob
+import importlib.resources
 import logging
 import os
 import random
@@ -33,9 +34,9 @@ from pathlib import Path
 from subprocess import CompletedProcess, Popen, TimeoutExpired
 from tempfile import TemporaryDirectory
 from threading import Event
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union, cast
+from types import FrameType
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
-import importlib_resources
 import psutil
 from granulate_utils.exceptions import CouldNotAcquireMutex
 from granulate_utils.linux.mutex import try_acquire_mutex
@@ -70,63 +71,35 @@ TEMPORARY_STORAGE_PATH = (
 
 gprofiler_mutex: Optional[socket.socket] = None
 
+# 1 KeyboardInterrupt raised per this many seconds, no matter how many SIGINTs we get.
+SIGINT_RATELIMIT = 0.5
+
+_last_signal_ts: Optional[float] = None
+_processes: List[Popen] = []
+
 
 @lru_cache(maxsize=None)
 def resource_path(relative_path: str = "") -> str:
     *relative_directory, basename = relative_path.split("/")
     package = ".".join(["gprofiler", "resources"] + relative_directory)
     try:
-        with importlib_resources.path(package, basename) as path:
+        with importlib.resources.path(package, basename) as path:
             return str(path)
     except ImportError as e:
         raise Exception(f"Resource {relative_path!r} not found!") from e
 
 
-libc: Optional[ctypes.CDLL] = None
-
-
-def prctl(*argv: Any) -> int:
-    global libc
-    if libc is None:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    return cast(int, libc.prctl(*argv))
-
-
-PR_SET_PDEATHSIG = 1
-
-
-def set_child_termination_on_parent_death() -> int:
-    ret = prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
-    if ret != 0:
-        errno = ctypes.get_errno()
-        logger.warning(
-            f"Failed to set parent-death signal on child process. errno: {errno}, strerror: {os.strerror(errno)}"
-        )
-    return ret
-
-
-def wrap_callbacks(callbacks: List[Callable]) -> Callable:
-    # Expects array of callback.
-    # Returns one callback that call each one of them, and returns the retval of last callback
-    def wrapper() -> Any:
-        ret = None
-        for cb in callbacks:
-            ret = cb()
-
-        return ret
-
-    return wrapper
-
-
 def start_process(
     cmd: Union[str, List[str]],
     via_staticx: bool = False,
-    term_on_parent_death: bool = True,
     tmpdir: Optional[Path] = None,
     **kwargs: Any,
 ) -> Popen:
     if isinstance(cmd, str):
         cmd = [cmd]
+
+    if kwargs.pop("pdeathsigger", True) and is_linux():
+        cmd = [resource_path("pdeathsigger")] + cmd if is_linux() else cmd
 
     logger.debug("Running command", command=cmd)
 
@@ -153,23 +126,17 @@ def start_process(
             # explicitly remove our directory from LD_LIBRARY_PATH
             env["LD_LIBRARY_PATH"] = ""
 
-    if is_windows():
-        cur_preexec_fn = None  # preexec_fn is not supported on Windows platforms. subprocess.py reports this.
-    else:
-        cur_preexec_fn = kwargs.pop("preexec_fn", os.setpgrp)
-        if term_on_parent_death:
-            cur_preexec_fn = wrap_callbacks([set_child_termination_on_parent_death, cur_preexec_fn])
-
-    popen = Popen(
+    process = Popen(
         cmd,
         stdout=kwargs.pop("stdout", subprocess.PIPE),
         stderr=kwargs.pop("stderr", subprocess.PIPE),
         stdin=subprocess.PIPE,
-        preexec_fn=cur_preexec_fn,
+        start_new_session=is_linux(),  # TODO: change to "process_group" after upgrade to Python 3.11+
         env=env,
         **kwargs,
     )
-    return popen
+    _processes.append(process)
+    return process
 
 
 def wait_event(timeout: float, stop_event: Event, condition: Callable[[], bool], interval: float = 0.1) -> None:
@@ -353,6 +320,7 @@ def pgrep_maps(match: str) -> List[Process]:
         shell=True,
         suppress_log=True,
         check=False,
+        pdeathsigger=False,
     )
     # 0 - found
     # 1 - not found
@@ -411,12 +379,7 @@ def touch_path(path: str, mode: int) -> None:
 
 
 def remove_path(path: Union[str, Path], missing_ok: bool = False) -> None:
-    # backporting missing_ok, available only from 3.8
-    try:
-        Path(path).unlink()
-    except FileNotFoundError:
-        if not missing_ok:
-            raise
+    Path(path).unlink(missing_ok=missing_ok)
 
 
 @contextmanager
@@ -559,3 +522,30 @@ def merge_dicts(source: Dict[str, Any], dest: Dict[str, Any]) -> Dict[str, Any]:
 
 def is_profiler_disabled(profile_mode: str) -> bool:
     return profile_mode in ("none", "disabled")
+
+
+def _exit_handler() -> None:
+    for process in _processes:
+        process.kill()
+
+
+def _sigint_handler(sig: int, frame: Optional[FrameType]) -> None:
+    global _last_signal_ts
+    ts = time.monotonic()
+    # no need for atomicity here: we can't get another SIGINT before this one returns.
+    # https://www.gnu.org/software/libc/manual/html_node/Signals-in-Handler.html#Signals-in-Handler
+    if _last_signal_ts is None or ts > _last_signal_ts + SIGINT_RATELIMIT:
+        _last_signal_ts = ts
+        raise KeyboardInterrupt
+
+
+def setup_signals() -> None:
+    atexit.register(_exit_handler)
+    # When we run under staticx & PyInstaller, both of them forward (some of the) signals to gProfiler.
+    # We catch SIGINTs and ratelimit them, to avoid being interrupted again during the handling of the
+    # first INT.
+    # See my commit message for more information.
+    signal.signal(signal.SIGINT, _sigint_handler)
+    # handle SIGTERM in the same manner - gracefully stop gProfiler.
+    # SIGTERM is also forwarded by staticx & PyInstaller, so we need to ratelimit it.
+    signal.signal(signal.SIGTERM, _sigint_handler)
