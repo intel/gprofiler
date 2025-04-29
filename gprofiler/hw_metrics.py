@@ -77,9 +77,12 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
         if not os.path.exists(PERFSPECT_DATA_DIRECTORY):
             os.makedirs(PERFSPECT_DATA_DIRECTORY)
         else:
-            os.remove(self._ps_raw_csv_filename)
-            os.remove(self._ps_summary_csv_filename)
-            os.remove(self._ps_summary_html_filename)
+            if os.path.exists(self._ps_raw_csv_filename):
+                os.remove(self._ps_raw_csv_filename)
+            if os.path.exists(self._ps_summary_csv_filename):
+                os.remove(self._ps_summary_csv_filename)
+            if os.path.exists(self._ps_summary_html_filename):
+                os.remove(self._ps_summary_html_filename)
 
     def start(self) -> None:
         # assert self._thread is None, "HWMetricsMonitor is already running"
