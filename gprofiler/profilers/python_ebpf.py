@@ -183,7 +183,8 @@ class PythonEbpfProfiler(ProfilerBase):
             "--duration",
             "1",
         ]
-        process = start_process(cmd, tmpdir=self._pyperf_staticx_tmpdir)
+        # pyperf sometimes has a lot of output to stdout and stderr, which makes the process halt until read.
+        process = start_process(cmd, tmpdir=self._pyperf_staticx_tmpdir, pipesize=1024 * 1024)
         try:
             poll_process(process, self._POLL_TIMEOUT, self._profiler_state.stop_event)
         except TimeoutError:
