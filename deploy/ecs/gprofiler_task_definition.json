@@ -5,7 +5,7 @@
     "containerDefinitions": [
         {
             "name": "granulate-gprofiler",
-            "image": "index.docker.io/granulate/gprofiler:latest",
+            "image": "index.docker.io/intel/gprofiler:latest",
             "memory": "1024",
             "memoryReservation": "256",
             "cpu": "100",

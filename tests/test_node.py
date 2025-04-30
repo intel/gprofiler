@@ -47,7 +47,7 @@ def test_nodejs_attach_maps(
     profiler_state: ProfilerState,
 ) -> None:
     if is_aarch64():
-        pytest.xfail("This test fails on aarch64 https://github.com/Granulate/gprofiler/issues/757")
+        pytest.xfail("This test fails on aarch64 https://github.com/intel/gprofiler/issues/757")
     with SystemProfiler(
         1000,
         6,

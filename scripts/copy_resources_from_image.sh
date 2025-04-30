@@ -16,7 +16,7 @@
 #
 set -euo pipefail
 
-IMAGE=${1:-granulate/gprofiler:latest}
+IMAGE=${1:-intel/gprofiler:latest}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 
 # copy the "gprofiler/resources" directory from the gprofiler container

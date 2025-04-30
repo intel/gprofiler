@@ -82,7 +82,7 @@ curl --retry-delay 5 --retry 5 -L https://sourceware.org/elfutils/ftp/$ELFUTILS_
 tar -xf elfutils-$ELFUTILS_VERSION.tar.bz2
 pushd elfutils-$ELFUTILS_VERSION
 # disable debuginfod, otherwise it will try to dlopen("libdebuginfod.so") in runtime & that can
-# cause problems, see https://github.com/Granulate/gprofiler/issues/340.
+# cause problems, see https://github.com/intel/gprofiler/issues/340.
 ./configure --disable-debuginfod --disable-libdebuginfod --prefix=/usr && make -j && make install
 popd
 rm -r elfutils-$ELFUTILS_VERSION elfutils-$ELFUTILS_VERSION.tar.bz2

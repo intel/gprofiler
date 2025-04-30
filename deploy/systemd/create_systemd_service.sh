@@ -27,7 +27,7 @@ TEMPLATE=$HERE/$UNIT_NAME.template
 
 if [ ! -f "$TEMPLATE" ]; then
     echo "Downloading template"
-    wget https://raw.githubusercontent.com/Granulate/gprofiler/master/deploy/systemd/granulate-gprofiler.service.template -O "$TEMPLATE"
+    wget https://raw.githubusercontent.com/intel/gprofiler/master/deploy/systemd/granulate-gprofiler.service.template -O "$TEMPLATE"
 fi
 
 if [ -f "$UNIT_NAME" ]; then echo "${UNIT_NAME} already exists, please remove it and re-run (and disable the service if installed from symlink)"; exit 1; fi

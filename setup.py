@@ -46,7 +46,7 @@ setuptools.setup(
     description="Production Profiling, Made Easy",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Granulate/gprofiler",
+    url="https://github.com/intel/gprofiler",
     classifiers=[
         "Programming Language :: Python :: 3",
     ],

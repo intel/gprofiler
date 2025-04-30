@@ -33,7 +33,7 @@
       register: machine
     - name: Download latest gProfiler
       ansible.builtin.get_url:
-        url: https://github.com/Granulate/gprofiler/releases/latest/download/gprofiler_{{machine.stdout}}
+        url: https://github.com/intel/gprofiler/releases/latest/download/gprofiler_{{machine.stdout}}
         dest: "{{gprofiler_path}}"
         mode: '0755'
         owner: root

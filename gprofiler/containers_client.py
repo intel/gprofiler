@@ -36,7 +36,7 @@ class ContainerNamesClient:
                 "Could not find a Docker daemon or CRI-compatible daemon, profiling data will not"
                 " include the container names. If you do have a containers runtime and it's not supported,"
                 " please open a new issue here:"
-                " https://github.com/Granulate/gprofiler/issues/new"
+                " https://github.com/intel/gprofiler/issues/new"
             )
             self._containers_client = None
 

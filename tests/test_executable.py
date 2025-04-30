@@ -46,13 +46,13 @@ def test_executable(
     _ = application_pid  # Fixture only used for running the application.
 
     if runtime == "php":
-        pytest.skip("Flaky, https://github.com/Granulate/gprofiler/issues/630")
+        pytest.skip("Flaky, https://github.com/intel/gprofiler/issues/630")
 
     if runtime == "python" and any("pyperf" in flag for flag in profiler_flags) and is_aarch64():
-        pytest.xfail("PyPerf doesn't run on Aarch64 - https://github.com/Granulate/gprofiler/issues/499")
+        pytest.xfail("PyPerf doesn't run on Aarch64 - https://github.com/intel/gprofiler/issues/499")
 
     if runtime == "dotnet":
-        pytest.xfail("Dotnet-trace doesn't work with alpine: https://github.com/Granulate/gprofiler/issues/795")
+        pytest.xfail("Dotnet-trace doesn't work with alpine: https://github.com/intel/gprofiler/issues/795")
 
     if exec_container_image is not None:
         if "centos:6" in exec_container_image.tags and any("pyperf" in flag for flag in profiler_flags):
