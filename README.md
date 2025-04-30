@@ -3,7 +3,7 @@ gProfiler combines multiple sampling profilers to produce unified visualization 
 what your CPU is spending time on, displaying stack traces of all processes running on your system
 across native programs<sup id="a1">[1](#perf-native)</sup> (includes Golang), Java and Python runtimes, and kernel routines.
 
-gProfiler can upload its results to a [self hosted studio](https://github.com/Granulate/gprofiler-performance-studio), which aggregates the results from different instances over different periods of time and can give you a holistic view of what is happening on your entire cluster.
+gProfiler can upload its results to a [self hosted studio](https://localhost:4433) using [gprofiler performance studio]((https://github.com/intel/gprofiler-performance-studio), which aggregates the results from different instances over different periods of time and can give you a holistic view of what is happening on your entire cluster.
 To upload results, you will have to register and generate a token on the website.
 
 gProfiler runs on Linux (on x86_64 and Aarch64; Aarch64 support is not complete yet and not all runtime profilers are supported, see [architecture support](#architecture-support)).
@@ -331,7 +331,7 @@ Alternatively, you can download gProfiler in your `Dockerfile` to avoid having t
 ## Running as a docker-compose service
 You can run a gProfiler container with `docker-compose` by using the template file in [docker-compose.yml](deploy/docker-compose/docker-compose.yml).
 Start by replacing the `<TOKEN>` and `<SERVICE NAME>` with values in the `command` section -
-* `<TOKEN>` should be replaced with your personal token from a self hosted studio site
+* `<TOKEN>` should be replaced with your personal token from a self hosted studio site (in the [Install Service](https://localhost:4433/installation) section)
 * The `<SERVICE NAME>` should be replaced with whatever service name you wish to use
 
 Optionally, you can add more command line arguments to the `command` section. For example, if you wish to use the `py-spy` profiler, you can add `--python-mode pyspy` to the commandline.
@@ -359,7 +359,7 @@ gcloud dataproc clusters create <CLUSTER NAME> \
 --metadata gprofiler-token="$TOKEN",gprofiler-service="$SERVICE",enable-stdout="1" --region <REGION>
 ```
 **Note** - make sure to replace the placeholders with the appropriate values -
-  - Replace `<TOKEN>` in the command line with your token you got from a self hosted studio site.
+  - Replace `<TOKEN>` in the command line with your token you got from a [self hosted studio](https://localhost:4433/installation) site.
   - Replace `<SERVICE NAME>` in the command line with the service name you wish to use.
   - Replace `<YOUR BUCKET>` with the bucket name you have uploaded the gProfiler initialization action script to.
   - Replace `<CLUSTER NAME>` with the cluster name you wish to use
@@ -394,7 +394,7 @@ node when the cluster is provisioned. You will need to provide the token and ser
 
    In the steps below, make sure to:
      - Replace `<BUCKET>` with the bucket where `gprofiler_action.sh` was uploaded.
-     - Replace `<TOKEN>` with the token you got from a self hosted studio site.
+     - Replace `<TOKEN>` with the token you got from a [self hosted studio](https://localhost:4433/installation) site.
      - Replace `<SERVICE>` with the service name you wish to use.
 
    With AWS CLI:
