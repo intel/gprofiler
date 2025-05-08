@@ -74,6 +74,41 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
             PERFSPECT_DATA_DIRECTORY + "/" + platform.node() + "_metrics_summary_latest.html"
         )
 
+        self._cleanup()
+
+    def start(self) -> None:
+        if (
+            self._perfspect_path is None
+            or not os.path.isfile(self._perfspect_path)
+            or not os.access(self._perfspect_path, os.X_OK)
+        ):
+            return None
+
+        ps_cmd = [
+            str(self._perfspect_path),
+            "metrics",
+            "--duration",
+            str(self._perfspect_duration),
+            "--output",
+            PERFSPECT_DATA_DIRECTORY,
+        ]
+
+        self._ps_process = subprocess.Popen(ps_cmd, stdout=subprocess.PIPE)
+
+    def stop(self) -> None:
+        if self._ps_process:
+            self._ps_process.terminate()
+
+        self._cleanup()
+        self._thread = None
+
+    def _cleanup(self) -> None:
+        # Remove the directory if it exists
+        # and create a new one
+        # to avoid any conflicts
+        # with the old data
+        # and to ensure that the directory is empty
+        # before starting the new process
         if not os.path.exists(PERFSPECT_DATA_DIRECTORY):
             os.makedirs(PERFSPECT_DATA_DIRECTORY)
         else:
@@ -83,52 +118,6 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
                 os.remove(self._ps_summary_csv_filename)
             if os.path.exists(self._ps_summary_html_filename):
                 os.remove(self._ps_summary_html_filename)
-
-    def start(self) -> None:
-        # assert self._thread is None, "HWMetricsMonitor is already running"
-        # assert not self._stop_event.is_set(), "Stop condition is already set (perhaps gProfiler was already stopped?)"
-
-        if self._perfspect_path is None:
-            return None
-
-        ps_cmd = [
-            str(self._perfspect_path),
-            "metrics",
-            # "--metrics",
-            # '"CPU operating frequency (in GHz)","CPI","TMA_Frontend_Bound(%)","TMA_Bad_Speculation(%)",'
-            # '"TMA_Backend_Bound(%)","TMA_Retiring(%)"',
-            "--duration",
-            str(self._perfspect_duration),
-            # "--live",
-            # "--format",
-            # "csv",
-            # "--interval",
-            # "10",
-            "--output",
-            PERFSPECT_DATA_DIRECTORY,
-        ]
-
-        self._ps_process = subprocess.Popen(ps_cmd, stdout=subprocess.PIPE)
-        #    ps_stdout, ps_stderr = ps_process.communicate()
-        #    try:
-        #        # wait 2 seconds to ensure it starts
-        #        ps_process.wait(2)
-        #    except subprocess.TimeoutExpired:
-        #        pass
-        #    else:
-        #        raise Exception(f"Command {ps_cmd} exited unexpectedly with {ps_process.returncode}")
-        # self._thread = Thread(target=self._continuously_poll_perfspect, args=(self._polling_rate_seconds,))
-        # self._thread.start()
-
-    def stop(self) -> None:
-        # assert self._thread is not None, "HWMetricsMonitor is not running"
-        # assert self._stop_event.is_set(), "Stop event was not set before stopping the HWMetricsMonitor"
-        if self._ps_process:
-            self._ps_process.terminate()
-        # self._thread.join(STOP_TIMEOUT_SECONDS)
-        # if self._thread.is_alive():
-        # raise ThreadStopTimeoutError("Timed out while waiting for the HWMetricsMonitor internal thread to stop")
-        self._thread = None
 
     def _get_hw_metrics_dict(self) -> Optional[dict]:
         summary_dict = {}
@@ -140,9 +129,6 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
                     csv_data = line.split(",")
                     summary_dict[csv_data[0]] = csv_data[1]
 
-            # For debug, print the json string here
-            # summary_json_string = json.dumps(summary_dict)
-            # print(summary_json_string, file=sys.stderr)
             os.remove(self._ps_latest_csv_filename)
             return summary_dict
 

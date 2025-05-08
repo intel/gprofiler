@@ -342,12 +342,11 @@ class GProfiler:
                 logger.info("No hw metrics_data were collected")
             else:
                 logger.info("Collected hw metrics_data")
-                # logger.info(json.dumps(hwmetrics.metrics_data)[:50])
+
             if hwmetrics.metrics_html is None:
                 logger.info("No hw metrics_html were collected")
             else:
                 logger.info("Collected hw metrics_html")
-                # logger.info(hwmetrics.metrics_html[:50])
 
         try:
             external_app_metadata = read_external_metadata(self._external_metadata_path).application
@@ -858,7 +857,7 @@ def parse_cmd_args() -> configargparse.Namespace:
             action="store_true",
             default=False,
             dest="collect_hw_metrics",
-            help="Enable sending HW metrics to the Performance Studio",
+            help="Enable to collect HW metrics through Perfspect tool which need to be installed separately.",
         )
         hw_metrics_options.add_argument(
             "--perfspect-path",
