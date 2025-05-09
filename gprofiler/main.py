@@ -48,6 +48,7 @@ from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.diagnostics import log_diagnostics, set_diagnostics
 from gprofiler.exceptions import APIError, NoProfilersEnabledError
 from gprofiler.gprofiler_types import ProcessToProfileData, UserArgs, integers_list, positive_integer
+from gprofiler.hw_metrics import HWMetricsMonitor, HWMetricsMonitorBase, NoopHWMetricsMonitor
 from gprofiler.log import RemoteLogsHandler, initial_root_logger_setup
 from gprofiler.merge import concatenate_from_external_file, concatenate_profiles, merge_profiles
 from gprofiler.metadata import ProfileMetadata
@@ -56,7 +57,7 @@ from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.external_metadata import ExternalMetadataStaleError, read_external_metadata
 from gprofiler.metadata.metadata_collector import get_current_metadata, get_static_metadata
 from gprofiler.metadata.system_metadata import get_hostname, get_run_mode, get_static_system_info
-from gprofiler.platform import is_linux, is_windows
+from gprofiler.platform import is_aarch64, is_linux, is_windows
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.factory import get_profilers
 from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase, ProfilerInterface
@@ -116,12 +117,15 @@ class GProfiler:
         duration: int,
         profile_api_version: str,
         profiling_mode: str,
+        collect_hw_metrics: bool,
         processes_to_profile: Optional[List[Process]],
         profile_spawned_processes: bool = True,
         remote_logs_handler: Optional[RemoteLogsHandler] = None,
         controller_process: Optional[Process] = None,
         external_metadata_path: Optional[Path] = None,
         heartbeat_file_path: Optional[Path] = None,
+        perfspect_path: Optional[Path] = None,
+        perfspect_duration: int = 60,
     ):
         self._output_dir = output_dir
         self._flamegraph = flamegraph
@@ -142,6 +146,9 @@ class GProfiler:
         self._duration = duration
         self._external_metadata_path = external_metadata_path
         self._heartbeat_file_path = heartbeat_file_path
+        self._collect_hw_metrics = collect_hw_metrics
+        self._perfspect_path = perfspect_path
+        self._perfspect_duration = perfspect_duration
         if self._collect_metadata:
             self._static_metadata = get_static_metadata(self._spawn_time, user_args, self._external_metadata_path)
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
@@ -168,6 +175,16 @@ class GProfiler:
             )
         else:
             self._system_metrics_monitor = NoopSystemMetricsMonitor()
+
+        if self._collect_hw_metrics and self._perfspect_path is not None:
+            logger.info(f"Using perfspect path: {self._perfspect_path}")
+            self._hw_metrics_monitor: HWMetricsMonitorBase = HWMetricsMonitor(
+                self._profiler_state.stop_event,
+                perfspect_path=self._perfspect_path,
+                perfspect_duration=self._perfspect_duration,
+            )
+        else:
+            self._hw_metrics_monitor = NoopHWMetricsMonitor()
 
         if isinstance(self.system_profiler, NoopProfiler) and not self.process_profilers:
             raise NoProfilersEnabledError()
@@ -255,8 +272,10 @@ class GProfiler:
         return "\n".join(lines)
 
     def start(self) -> None:
+        logger.info("Starting ...")
         self._profiler_state.stop_event.clear()
         self._system_metrics_monitor.start()
+        self._hw_metrics_monitor.start()
 
         for prof in list(self.all_profilers):
             try:
@@ -275,6 +294,7 @@ class GProfiler:
         logger.info("Stopping ...")
         self._profiler_state.stop_event.set()
         self._system_metrics_monitor.stop()
+        self._hw_metrics_monitor.stop()
         for prof in self.all_profilers:
             prof.stop()
 
@@ -314,6 +334,19 @@ class GProfiler:
         )
         metadata.update({"profiling_mode": self._profiler_state.profiling_mode})
         metrics = self._system_metrics_monitor.get_metrics()
+        hwmetrics = self._hw_metrics_monitor.get_hw_metrics()
+        if hwmetrics is None:
+            logger.info("No hw metrics were collected")
+        else:
+            if hwmetrics.metrics_data is None:
+                logger.info("No hw metrics_data were collected")
+            else:
+                logger.info("Collected hw metrics_data")
+
+            if hwmetrics.metrics_html is None:
+                logger.info("No hw metrics_html were collected")
+            else:
+                logger.info("Collected hw metrics_html")
 
         try:
             external_app_metadata = read_external_metadata(self._external_metadata_path).application
@@ -329,6 +362,7 @@ class GProfiler:
                 enrichment_options=self._enrichment_options,
                 metadata=metadata,
                 metrics=metrics,
+                hwmetrics=hwmetrics,
                 external_app_metadata=external_app_metadata,
             )
 
@@ -340,6 +374,7 @@ class GProfiler:
                 enrichment_options=self._enrichment_options,
                 metadata=metadata,
                 metrics=metrics,
+                hwmetrics=hwmetrics,
                 external_app_metadata=external_app_metadata,
             )
 
@@ -815,6 +850,32 @@ def parse_cmd_args() -> configargparse.Namespace:
         "The file modification indicates the last snapshot time.",
     )
 
+    if is_linux() and not is_aarch64():
+        hw_metrics_options = parser.add_argument_group("hardware metrics")
+        hw_metrics_options.add_argument(
+            "--enable-hw-metrics-collection",
+            action="store_true",
+            default=False,
+            dest="collect_hw_metrics",
+            help="Enable to collect HW metrics through Perfspect tool which need to be installed separately.",
+        )
+        hw_metrics_options.add_argument(
+            "--perfspect-path",
+            type=str,
+            dest="tool_perfspect_path",
+            default=None,
+            help="Enable HW metrics collection with PerfSpect tool."
+            " Provide path to PerfSpect binary to enable collection.",
+        )
+        hw_metrics_options.add_argument(
+            "--perfspect-duration",
+            action="store",
+            type=positive_integer,
+            dest="tool_perfspect_duration",
+            default=60,
+            help="The default perfspect tool collection time is 60 second.",
+        )
+
     args = parser.parse_args()
 
     args.perf_inject = args.nodejs_mode == "perf"
@@ -1073,6 +1134,13 @@ def main() -> None:
         if args.heartbeat_file is not None:
             heartbeat_file_path = Path(args.heartbeat_file)
 
+        perfspect_path: Optional[Path] = None
+        if args.tool_perfspect_path is not None:
+            perfspect_path = Path(args.tool_perfspect_path)
+            if not perfspect_path.is_file():
+                logger.error(f"PerfSpect tool {args.tool_perfspect_path} does not exist!")
+                sys.exit(1)
+
         try:
             log_system_info()
         except Exception:
@@ -1151,12 +1219,15 @@ def main() -> None:
             duration=args.duration,
             profile_api_version=args.profile_api_version,
             profiling_mode=args.profiling_mode,
+            collect_hw_metrics=args.collect_hw_metrics,
             profile_spawned_processes=args.profile_spawned_processes,
             remote_logs_handler=remote_logs_handler,
             controller_process=controller_process,
             processes_to_profile=processes_to_profile,
             external_metadata_path=external_metadata_path,
             heartbeat_file_path=heartbeat_file_path,
+            perfspect_path=args.tool_perfspect_path,
+            perfspect_duration=args.tool_perfspect_duration,
         )
         logger.info("gProfiler initialized and ready to start profiling")
         if args.continuous:

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import platform
 import sys
 from functools import lru_cache
 
@@ -28,3 +29,8 @@ def is_windows() -> bool:
 @lru_cache(maxsize=None)
 def is_linux() -> bool:
     return sys.platform == LINUX_PLATFORM_NAME
+
+
+@lru_cache(maxsize=None)
+def is_aarch64() -> bool:
+    return platform.machine() == "aarch64"
