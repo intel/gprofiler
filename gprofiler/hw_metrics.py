@@ -3,7 +3,7 @@ import gzip
 import os
 import platform
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
