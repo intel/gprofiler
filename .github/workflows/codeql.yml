@@ -45,20 +45,20 @@ jobs:
         include:
         - language: actions
           build-mode: none
-        - language: c-cpp
-          build-mode: autobuild
-        - language: csharp
-          build-mode: none
+        # - language: c-cpp
+        #   build-mode: autobuild
+        # - language: csharp
+        #   build-mode: none
         - language: go
           build-mode: autobuild
-        - language: java-kotlin
-          build-mode: none # This mode only analyzes Java. Set this to 'autobuild' or 'manual' to analyze Kotlin too.
+        # - language: java-kotlin
+        #   build-mode: none # This mode only analyzes Java. Set this to 'autobuild' or 'manual' to analyze Kotlin too.
         - language: javascript-typescript
           build-mode: none
         - language: python
           build-mode: none
-        - language: ruby
-          build-mode: none
+        # - language: ruby
+        #   build-mode: none
         # CodeQL supports the following values keywords for 'language': 'actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'swift'
         # Use `c-cpp` to analyze code written in C, C++ or both
         # Use 'java-kotlin' to analyze code written in Java, Kotlin or both
