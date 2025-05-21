@@ -120,7 +120,7 @@ jobs:
     - name: GitHub Upload Release Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: report
+        name: ${{ matrix.language }}-report
         path: |
-         ./${{ matrix.language }}-report.pdf
+         ./report.pdf
 
