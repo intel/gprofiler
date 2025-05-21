@@ -11,6 +11,9 @@
 #
 name: "CodeQL Advanced"
 
+permissions: 
+  security-events: write
+
 on:
   push:
     branches: [ "master" ]
