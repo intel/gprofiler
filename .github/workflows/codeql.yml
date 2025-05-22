@@ -14,13 +14,7 @@ name: "CodeQL Advanced"
 permissions: 
   security-events: write
 
-on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-  schedule:
-    - cron: '05 19 * * 2'
+on: pull_request
 
 jobs:
   analyze:
