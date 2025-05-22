@@ -14,7 +14,11 @@ name: "CodeQL Advanced"
 permissions: 
   security-events: write
 
-on: pull_request
+on: 
+  pull_request:
+  push:
+    tags:
+      - '**'
 
 jobs:
   analyze:
