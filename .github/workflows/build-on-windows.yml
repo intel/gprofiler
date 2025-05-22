@@ -1,5 +1,8 @@
 name: Build gProfiler on Windows
 
+permissions:
+  contents: read
+
 on: pull_request
 
 jobs:
