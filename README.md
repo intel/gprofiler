@@ -518,6 +518,25 @@ Additionally, each frame has a suffix which designates the profiler it originate
 | .NET (dotnet-trace)                   | Per dotnet-trace                                                                                                                                                                        | `_[net]`                                                                                                 |
 | Kernel (perf, async-profiler, PyPerf) | Function name                                                                                                                                                                           | `_[k]`                                                                                                   |
 
+# Security Concerns
+
+Consider reviewing Docker security docs described in https://docs.docker.com/engine/security/
+If you're using Docker, it's recommended to enable the following security settings if required by your organization and applicable:
+* Enable AppArmor Profile (https://docs.docker.com/engine/security/apparmor/)
+* Enable SELinux 
+* Update the IP address bindings in the docker-compose file (they default to 0.0.0.0 on all interfaces) to your specific hosts.  
+  * Default port settings in docker-compose are: "8080:80" and "4433:443"
+  * You can bind them to your desired ip by setting them to: "{my_ip}:8080:80" and "{my_ip}:4433:443"
+* Mount the container's root file system as read only
+* Restrict the container from acquiring additional privileges using --no-new-privilege
+* Make sure the Docker commands always make use of the latest version of their images
+
+Be aware that when deployed as a container...
+
+* gProfiler may require privileged mode to operate.  Make sure you understand the security implications by reviewing the [Docker security docs](https://docs.docker.com/engine/security/) 
+* The host PID and user namespace will be shared with gProfiler to allow it to run as root outside the container.  Consider using [rootless mode](#rootless-mode)
+
+
 # Building
 
 Please refer to the [building](./CONTRIBUTING.md#building) section.
