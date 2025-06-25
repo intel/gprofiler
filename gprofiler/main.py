@@ -1135,7 +1135,7 @@ def main() -> None:
             heartbeat_file_path = Path(args.heartbeat_file)
 
         perfspect_path: Optional[Path] = None
-        if args.tool_perfspect_path is not None:
+        if hasattr(args, "tool_perfspect_path") and args.tool_perfspect_path is not None:
             perfspect_path = Path(args.tool_perfspect_path)
             if not perfspect_path.is_file():
                 logger.error(f"PerfSpect tool {args.tool_perfspect_path} does not exist!")
