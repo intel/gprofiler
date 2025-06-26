@@ -1249,6 +1249,8 @@ def main() -> None:
 
     usage_logger.log_run()
 
+    print("Done")
+
 
 if __name__ == "__main__":
     main()
