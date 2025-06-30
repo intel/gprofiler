@@ -8,7 +8,7 @@
 name: Build, test and deploy
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   pull_request:
