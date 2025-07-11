@@ -112,16 +112,16 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
     If the directory exists and is not owned by root, it is removed and recreated. If after recreation
     it is still not owned by root, the function raises.
     """
-    assert is_root()  # this function behaves as we expect only when run as root
 
     path = path if isinstance(path, Path) else Path(path)
     # parent is expected to be root - otherwise, after we create the root-owned directory, it can be removed
     # as re-created as non-root by a regular user.
-    if not is_owned_by_root(path.parent):
+    if is_root() and not is_owned_by_root(path.parent):
         raise Exception(f"expected {path.parent} to be owned by root!")
 
     if path.exists():
-        if is_owned_by_root(path):
+        return
+        if is_root() and is_owned_by_root(path):
             return
 
         shutil.rmtree(path)
@@ -132,6 +132,6 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
         # likely racing with another thread of gprofiler. as long as the directory is root after all, we're good.
         pass
 
-    if not is_owned_by_root(path):
-        # lost race with someone else?
+    if is_root() and not is_owned_by_root(path):
+       # lost race with someone else?
         raise Exception(f"Failed to create directory {str(path)} as owned by root")

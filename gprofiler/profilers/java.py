@@ -54,6 +54,7 @@ if is_linux():
         get_process_nspid,
         resolve_proc_root_links,
         run_in_ns_wrapper,
+        is_root,
     )
     from granulate_utils.linux.oom import get_oom_entry
     from granulate_utils.linux.process import (
@@ -527,7 +528,7 @@ class AsyncProfiledProcess:
         #   ancestor is still alive.
         # there is a hidden assumption here that neither the ancestor nor the process will change their mount
         # namespace. I think it's okay to assume that.
-        self._process_root = get_proc_root_path(process)
+        self._process_root = get_proc_root_path(process, from_ancestor = True if is_root() else False)
         self._cmdline = process.cmdline()
         self._cwd = process.cwd()
         self._nspid = get_process_nspid(self.process.pid)
@@ -583,6 +584,11 @@ class AsyncProfiledProcess:
             if not full_dir.parent.exists():
                 continue  # we do not create the parent.
 
+            # Bypass the root check in case of rootless collection
+            if not is_root():
+                logger.debug("_find_rw_exec_dir", full_dir=full_dir)
+                return str(full_dir)
+
             if not is_owned_by_root(full_dir.parent):
                 continue  # the parent needs to be owned by root
 
@@ -606,9 +612,11 @@ class AsyncProfiledProcess:
         # for sanity & simplicity, mkdir_owned_root() does not support creating parent directories, as this allows
         # the caller to absentmindedly ignore the check of the parents ownership.
         # hence we create the structure here part by part.
-        assert is_owned_by_root(
-            Path(self._ap_dir_base)
-        ), f"expected {self._ap_dir_base} to be owned by root at this point"
+        # Bypass the root check in case of rootless collection
+        if is_root():
+            assert is_owned_by_root(
+                Path(self._ap_dir_base)
+                ), f"expected {self._ap_dir_base} to be owned by root at this point"
         mkdir_owned_root(self._ap_dir_versioned)
         mkdir_owned_root(self._ap_dir_host)
         os.makedirs(self._storage_dir_host, 0o755, exist_ok=True)
