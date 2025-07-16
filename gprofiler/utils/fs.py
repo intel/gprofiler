@@ -133,5 +133,5 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
         pass
 
     if is_root() and not is_owned_by_root(path):
-       # lost race with someone else?
+        # lost race with someone else?
         raise Exception(f"Failed to create directory {str(path)} as owned by root")
