@@ -42,6 +42,7 @@ from gprofiler.utils import (
     start_process,
     wait_event,
     wait_for_file_by_prefix,
+    cleanup_process_reference
 )
 from gprofiler.utils.collapsed_format import parse_many_collapsed
 
@@ -191,6 +192,7 @@ class PythonEbpfProfiler(ProfilerBase):
             process.kill()
             raise
         else:
+            cleanup_process_reference(process)
             self._check_output(process, self.output_path)
         finally:
             self._staticx_cleanup()
@@ -224,6 +226,7 @@ class PythonEbpfProfiler(ProfilerBase):
             wait_event(self._POLL_TIMEOUT, self._profiler_state.stop_event, lambda: os.path.exists(self.output_path))
         except TimeoutError:
             process.kill()
+            cleanup_process_reference(process)
             assert process.stdout is not None and process.stderr is not None
             stdout = process.stdout.read()
             stderr = process.stderr.read()
@@ -233,6 +236,20 @@ class PythonEbpfProfiler(ProfilerBase):
         else:
             self.process = process
             self._register_process_selectors()
+
+    def _check_process_health(self) -> bool:
+        """Check if the process is still alive and clean up if not"""
+        if self.process is None:
+            return False
+
+        if self.process.poll() is not None:
+            # Process has terminated
+            logger.warning("PyPerf process has terminated unexpectedly")
+            cleanup_process_reference(process=self.process)
+            self.process = None
+            return False
+
+        return True
 
     def _register_process_selectors(self) -> None:
         self.process_selector = selectors.DefaultSelector()
@@ -264,9 +281,17 @@ class PythonEbpfProfiler(ProfilerBase):
         return stdout, stderr
 
     def _dump(self) -> Path:
-        assert self.is_running()
-        assert self.process is not None  # for mypy
-        self.process.send_signal(self._DUMP_SIGNAL)
+        if not self._check_process_health():
+            raise Exception("PyPerf process is not running")
+
+        try:
+            self.process.send_signal(self._DUMP_SIGNAL)
+        except ProcessLookupError:
+            # Process died between health check and signal send
+            if self.process is not None:
+                cleanup_process_reference(process=self.process)
+                self.process = None
+            raise Exception("PyPerf process crashed before dump signal")
 
         try:
             # important to not grab the transient data file - hence the following '.'
@@ -288,9 +313,25 @@ class PythonEbpfProfiler(ProfilerBase):
             raise PythonEbpfError(exit_status, process.args, stdout, stderr)
 
     def snapshot(self) -> ProcessToProfileData:
+        # Add health check at the beginning
+        if not self._check_process_health():
+            raise Exception("PyPerf process has crashed or terminated")
+
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException()
-        collapsed_path = self._dump()
+
+        try:
+            stderr = self.process.stderr.read1().decode()
+            collapsed_path = self._dump()
+        except (BrokenPipeError, ProcessLookupError, OSError) as e:
+            # Process crashed during operation
+            logger.error(f"PyPerf process crashed during snapshot: {e}")
+            if self.process is not None:
+                # Clean up the global reference
+                cleanup_process_reference(self.process)
+                self.process = None
+            raise Exception("PyPerf process crashed during snapshot") from e
+
         try:
             collapsed_text = collapsed_path.read_text()
         finally:

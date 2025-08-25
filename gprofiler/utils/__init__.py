@@ -264,6 +264,10 @@ def run_process(
             reraise_exc = e
         retcode = process.poll()
         assert retcode is not None  # only None if child has not terminated
+        try:
+            _processes.remove(process)
+        except ValueError:
+            pass  # already removed
 
     result: CompletedProcess[bytes] = CompletedProcess(process.args, retcode, stdout, stderr)
 
@@ -522,6 +526,14 @@ def merge_dicts(source: Dict[str, Any], dest: Dict[str, Any]) -> Dict[str, Any]:
 
 def is_profiler_disabled(profile_mode: str) -> bool:
     return profile_mode in ("none", "disabled")
+
+
+def cleanup_process_reference(process: Popen) -> None:
+    """Remove process from global _processes list"""
+    try:
+        _processes.remove(process)
+    except ValueError:
+        pass  # Already removed
 
 
 def _exit_handler() -> None:
