@@ -264,10 +264,7 @@ def run_process(
             reraise_exc = e
         retcode = process.poll()
         assert retcode is not None  # only None if child has not terminated
-        try:
-            _processes.remove(process)
-        except ValueError:
-            pass  # already removed
+        cleanup_process_reference(process)
 
     result: CompletedProcess[bytes] = CompletedProcess(process.args, retcode, stdout, stderr)
 

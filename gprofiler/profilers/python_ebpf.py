@@ -280,18 +280,12 @@ class PythonEbpfProfiler(ProfilerBase):
                 stderr = output
         return stdout, stderr
 
-    def _dump(self) -> Path:
+    def _dump(self) -> Optional[Path]:
         if not self._check_process_health():
-            raise Exception("PyPerf process is not running")
-
-        try:
+            logger.error("PyPerf process is not running")
+            return None
+        else:
             self.process.send_signal(self._DUMP_SIGNAL)
-        except ProcessLookupError:
-            # Process died between health check and signal send
-            if self.process is not None:
-                cleanup_process_reference(process=self.process)
-                self.process = None
-            raise Exception("PyPerf process crashed before dump signal")
 
         try:
             # important to not grab the transient data file - hence the following '.'
@@ -315,23 +309,27 @@ class PythonEbpfProfiler(ProfilerBase):
     def snapshot(self) -> ProcessToProfileData:
         # Add health check at the beginning
         if not self._check_process_health():
-            raise Exception("PyPerf process has crashed or terminated")
+            logger.error("PyPerf process is not running")
+            return {}
 
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException()
 
+        collapsed_path = None
         try:
-            stderr = self.process.stderr.read1().decode()
             collapsed_path = self._dump()
         except (BrokenPipeError, ProcessLookupError, OSError) as e:
             # Process crashed during operation
-            logger.error(f"PyPerf process crashed during snapshot: {e}")
+            logger.error(f"PyPerf process crashed or became unavailable during snapshot: {type(e).__name__}: {e}")
             if self.process is not None:
                 # Clean up the global reference
                 cleanup_process_reference(self.process)
                 self.process = None
-            raise Exception("PyPerf process crashed during snapshot") from e
 
+        if collapsed_path is None:
+            logger.error("collapsed_path is None, cannot parse output")
+            return {}
+        
         try:
             collapsed_text = collapsed_path.read_text()
         finally:

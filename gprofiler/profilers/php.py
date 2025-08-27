@@ -157,18 +157,12 @@ class PHPSpyProfiler(ProfilerBase):
 
         return True
 
-    def _dump(self) -> Path:
+    def _dump(self) -> Optional[Path]:
         if not self._check_process_health():
-            raise Exception("phpspy process is not running")
-
-        try:
+            logger.error("phpspy process is not running")
+            return None
+        else:
             self._process.send_signal(self.dump_signal)
-        except ProcessLookupError:
-            # Process died between health check and signal send
-            if self._process is not None:
-                cleanup_process_reference(process=self._process)
-                self._process = None
-            raise Exception("phpspy process crashed before dump signal")
 
         # important to not grab the transient data file
         while True:
@@ -257,23 +251,28 @@ class PHPSpyProfiler(ProfilerBase):
     def snapshot(self) -> ProcessToProfileData:
         # Add health check at the beginning
         if not self._check_process_health():
-            raise Exception("phpspy process has crashed or terminated")
+            logger.error("phpspy process is not running")
+            return {}
 
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException()
 
+        phpspy_output_path = None
         try:
             stderr = self._process.stderr.read1().decode()  # type: ignore
             logger.debug("phpspy stderr", stderr=self._filter_phpspy_stderr(stderr))
             phpspy_output_path = self._dump()
         except (BrokenPipeError, ProcessLookupError, OSError) as e:
             # Process crashed during operation
-            logger.error(f"phpspy process crashed during snapshot: {e}")
+            logger.error(f"phpspy process crashed or became unavailable during snapshot: {type(e).__name__}: {e}")
             if self._process is not None:
                 # Clean up the global reference
                 cleanup_process_reference(self._process)
                 self._process = None
-            raise Exception("phpspy process crashed during snapshot") from e
+
+        if phpspy_output_path is None:
+            logger.error("phpspy_output_path is None, cannot parse output")
+            return {}
 
         phpspy_output_text = phpspy_output_path.read_text()
         phpspy_output_path.unlink()
