@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from psutil import Process
 
+from gprofiler.exceptions import CalledProcessError
 from gprofiler.log import get_logger_adapter
 from gprofiler.utils import (
     reap_process,
@@ -189,10 +190,18 @@ class PerfProcess:
                 perf_data.unlink()
                 perf_data = inject_data
 
-            perf_script_proc = run_process(
-                [perf_path(), "script", "-F", "+pid", "-i", str(perf_data)],
-                suppress_log=True,
-            )
+            perf_script_cmd = [perf_path(), "script", "-F", "+pid", "-i", str(perf_data)]
+            try:
+                perf_script_proc = run_process(
+                    perf_script_cmd,
+                    suppress_log=True,
+                )
+            except CalledProcessError as e:
+                logger.critical(
+                    f"{self._log_name} failed to run perf script: {str(e)}",
+                    command=" ".join(perf_script_cmd),
+                )
+                return ""
             return perf_script_proc.stdout.decode("utf8")
         finally:
             perf_data.unlink()
