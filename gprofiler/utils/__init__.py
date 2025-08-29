@@ -33,7 +33,7 @@ from functools import lru_cache
 from pathlib import Path
 from subprocess import CompletedProcess, Popen, TimeoutExpired
 from tempfile import TemporaryDirectory
-from threading import Event
+from threading import Event, Thread
 from types import FrameType
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -93,6 +93,7 @@ def start_process(
     cmd: Union[str, List[str]],
     via_staticx: bool = False,
     tmpdir: Optional[Path] = None,
+    direct_call: bool = True,
     **kwargs: Any,
 ) -> Popen:
     if isinstance(cmd, str):
@@ -135,7 +136,16 @@ def start_process(
         env=env,
         **kwargs,
     )
+
+    def process_exit_handler() -> None:
+        process.communicate()
+        # Remove from _processes and do any cleanup
+        cleanup_process_reference(process)
+        logger.critical(f"Process {process.pid} exited, total processes tracked {len(_processes)}")
+
     _processes.append(process)
+    if direct_call:
+        Thread(target=process_exit_handler, daemon=True).start()
     return process
 
 
@@ -150,14 +160,6 @@ def wait_event(timeout: float, stop_event: Event, condition: Callable[[], bool],
 
         if time.monotonic() > end_time:
             raise TimeoutError()
-
-
-def poll_process(process: Popen, timeout: float, stop_event: Event) -> None:
-    try:
-        wait_event(timeout, stop_event, lambda: process.poll() is not None)
-    except StopEventSetException:
-        process.kill()
-        raise
 
 
 def remove_files_by_prefix(prefix: str) -> None:
@@ -228,7 +230,7 @@ def run_process(
     stderr: bytes
 
     reraise_exc: Optional[BaseException] = None
-    with start_process(cmd, via_staticx, **kwargs) as process:
+    with start_process(cmd, via_staticx, direct_call=False, **kwargs) as process:
         assert isinstance(process.args, str) or (
             isinstance(process.args, list) and all(isinstance(s, str) for s in process.args)
         ), process.args  # mypy
@@ -536,6 +538,8 @@ def cleanup_process_reference(process: Popen) -> None:
 def _exit_handler() -> None:
     for process in _processes:
         process.kill()
+        # remove process in _processes
+        cleanup_process_reference(process)
 
 
 def _sigint_handler(sig: int, frame: Optional[FrameType]) -> None:

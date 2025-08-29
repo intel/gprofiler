@@ -34,7 +34,6 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers import python
 from gprofiler.profilers.profiler_base import ProfilerBase
 from gprofiler.utils import (
-    poll_process,
     random_prefix,
     reap_process,
     resource_path,
@@ -187,14 +186,14 @@ class PythonEbpfProfiler(ProfilerBase):
         # pyperf sometimes has a lot of output to stdout and stderr, which makes the process halt until read.
         process = start_process(cmd, tmpdir=self._pyperf_staticx_tmpdir, pipesize=1024 * 1024)
         try:
-            poll_process(process, self._POLL_TIMEOUT, self._profiler_state.stop_event)
-        except TimeoutError:
+            wait_event(self._POLL_TIMEOUT, self._profiler_state.stop_event, lambda: process.poll() is not None)
+        except (TimeoutError, StopEventSetException):
             process.kill()
             raise
         else:
-            cleanup_process_reference(process)
             self._check_output(process, self.output_path)
         finally:
+            cleanup_process_reference(process)
             self._staticx_cleanup()
 
     def start(self) -> None:
