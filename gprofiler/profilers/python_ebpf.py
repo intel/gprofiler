@@ -34,6 +34,7 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers import python
 from gprofiler.profilers.profiler_base import ProfilerBase
 from gprofiler.utils import (
+    cleanup_process_reference,
     random_prefix,
     reap_process,
     resource_path,
@@ -41,7 +42,6 @@ from gprofiler.utils import (
     start_process,
     wait_event,
     wait_for_file_by_prefix,
-    cleanup_process_reference
 )
 from gprofiler.utils.collapsed_format import parse_many_collapsed
 
@@ -328,7 +328,7 @@ class PythonEbpfProfiler(ProfilerBase):
         if collapsed_path is None:
             logger.error("collapsed_path is None, cannot parse output")
             return {}
-        
+
         try:
             collapsed_text = collapsed_path.read_text()
         finally:

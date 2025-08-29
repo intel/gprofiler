@@ -31,12 +31,12 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.profiler_base import ProfilerBase
 from gprofiler.profilers.registry import ProfilerArgument, register_profiler
 from gprofiler.utils import (
+    cleanup_process_reference,
     random_prefix,
     reap_process,
     resource_path,
     start_process,
     wait_event,
-    cleanup_process_reference,
 )
 
 logger = get_logger_adapter(__name__)

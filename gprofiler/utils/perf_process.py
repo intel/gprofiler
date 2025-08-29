@@ -8,8 +8,10 @@ from typing import List, Optional
 
 from psutil import Process
 
+from gprofiler.exceptions import CalledProcessError
 from gprofiler.log import get_logger_adapter
 from gprofiler.utils import (
+    cleanup_process_reference,
     reap_process,
     remove_files_by_prefix,
     remove_path,
@@ -18,10 +20,7 @@ from gprofiler.utils import (
     start_process,
     wait_event,
     wait_for_file_by_prefix,
-    cleanup_process_reference
 )
-
-from gprofiler.exceptions import CalledProcessError
 
 logger = get_logger_adapter(__name__)
 
