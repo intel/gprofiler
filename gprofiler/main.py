@@ -1221,15 +1221,15 @@ def main() -> None:
             duration=args.duration,
             profile_api_version=args.profile_api_version,
             profiling_mode=args.profiling_mode,
-            collect_hw_metrics=args.collect_hw_metrics,
+            collect_hw_metrics=getattr(args, "collect_hw_metrics", False),
             profile_spawned_processes=args.profile_spawned_processes,
             remote_logs_handler=remote_logs_handler,
             controller_process=controller_process,
             processes_to_profile=processes_to_profile,
             external_metadata_path=external_metadata_path,
             heartbeat_file_path=heartbeat_file_path,
-            perfspect_path=args.tool_perfspect_path,
-            perfspect_duration=args.tool_perfspect_duration,
+            perfspect_path=perfspect_path,
+            perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
             verbose=args.verbose,
         )
         logger.info("gProfiler initialized and ready to start profiling")
