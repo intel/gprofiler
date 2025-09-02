@@ -284,7 +284,8 @@ class PythonEbpfProfiler(ProfilerBase):
             logger.error("PyPerf process is not running")
             return None
         else:
-            self.process.send_signal(self._DUMP_SIGNAL)
+            if self.process is not None:
+                self.process.send_signal(self._DUMP_SIGNAL)
 
         try:
             # important to not grab the transient data file - hence the following '.'
@@ -300,10 +301,14 @@ class PythonEbpfProfiler(ProfilerBase):
             process = self.process  # save it
             exit_status, stderr, stdout = self._terminate()
             assert exit_status is not None, "PyPerf didn't exit after _terminate()!"
-            assert isinstance(process.args, list) and all(
-                isinstance(s, str) for s in process.args
-            ), process.args  # mypy
-            raise PythonEbpfError(exit_status, process.args, stdout, stderr)
+            if process is not None:
+                assert isinstance(process.args, list) and all(
+                    isinstance(s, str) for s in process.args
+                ), process.args  # mypy
+                cmd_args = [str(s) for s in process.args]
+            else:
+                cmd_args = []
+            raise PythonEbpfError(exit_status, cmd_args, stdout, stderr)
 
     def snapshot(self) -> ProcessToProfileData:
         # Add health check at the beginning

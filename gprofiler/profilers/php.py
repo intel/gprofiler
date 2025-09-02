@@ -162,7 +162,8 @@ class PHPSpyProfiler(ProfilerBase):
             logger.error("phpspy process is not running")
             return None
         else:
-            self._process.send_signal(self.dump_signal)
+            if self._process is not None:
+                self._process.send_signal(self.dump_signal)
 
         # important to not grab the transient data file
         while True:
