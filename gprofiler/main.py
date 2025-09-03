@@ -126,6 +126,7 @@ class GProfiler:
         heartbeat_file_path: Optional[Path] = None,
         perfspect_path: Optional[Path] = None,
         perfspect_duration: int = 60,
+        verbose: bool = False,
     ):
         self._output_dir = output_dir
         self._flamegraph = flamegraph
@@ -182,6 +183,7 @@ class GProfiler:
                 self._profiler_state.stop_event,
                 perfspect_path=self._perfspect_path,
                 perfspect_duration=self._perfspect_duration,
+                verbose=verbose,
             )
         else:
             self._hw_metrics_monitor = NoopHWMetricsMonitor()
@@ -1228,6 +1230,7 @@ def main() -> None:
             heartbeat_file_path=heartbeat_file_path,
             perfspect_path=perfspect_path,
             perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
+            verbose=args.verbose,
         )
         logger.info("gProfiler initialized and ready to start profiling")
         if args.continuous:

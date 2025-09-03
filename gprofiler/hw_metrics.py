@@ -57,6 +57,7 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
         perfspect_path: Optional[Path] = None,
         perfspect_duration: int = 60,
         polling_rate_seconds: int = DEFAULT_POLLING_INTERVAL_SECONDS,
+        verbose: bool = False,
     ):
         self._polling_rate_seconds = polling_rate_seconds
         self._stop_event = stop_event
@@ -65,6 +66,7 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
         self._ps_process: Optional[subprocess.Popen[bytes]] = None
         self._perfspect_path: Optional[Path] = perfspect_path
         self._perfspect_duration = perfspect_duration
+        self._verbose = verbose
 
         self._ps_raw_csv_filename = PERFSPECT_DATA_DIRECTORY + "/" + platform.node() + "_metrics.csv"
         self._ps_summary_csv_filename = PERFSPECT_DATA_DIRECTORY + "/" + platform.node() + "_metrics_summary.csv"
@@ -93,7 +95,17 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
             PERFSPECT_DATA_DIRECTORY,
         ]
 
+        # Add --debug if verbose is enabled
+        if self._verbose:
+            ps_cmd.append("--debug")
+
         self._ps_process = subprocess.Popen(ps_cmd, stdout=subprocess.PIPE)
+        Thread(target=self._reap_ps_process, daemon=True).start()
+
+    def _reap_ps_process(self) -> None:
+        if self._ps_process is not None:
+            self._ps_process.wait()
+            self._ps_process = None
 
     def stop(self) -> None:
         if self._ps_process:
