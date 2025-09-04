@@ -146,7 +146,10 @@ def _enrich_pid_stacks(
 
 
 def _enrich_and_finalize_stack(
-    stack: str, count: int, enrichment_options: EnrichmentOptions, enrich_data: PidStackEnrichment
+    stack: str,
+    count: int,
+    enrichment_options: EnrichmentOptions,
+    enrich_data: PidStackEnrichment,
 ) -> str:
     """
     Attach the enrichment data collected for the PID of this stack.
@@ -219,7 +222,10 @@ def concatenate_profiles(
 
     for pid, profile in process_profiles.items():
         enrich_data = _enrich_pid_stacks(
-            profile, enrichment_options, application_metadata, external_app_metadata.get(pid)
+            profile,
+            enrichment_options,
+            application_metadata,
+            external_app_metadata.get(pid),
         )
         for stack, count in profile.stacks.items():
             lines.append(_enrich_and_finalize_stack(stack, count, enrichment_options, enrich_data))
@@ -258,8 +264,7 @@ def merge_profiles(
 
         process_perf = perf_pid_to_profiles.get(pid)
         if process_perf is None:
-            # no samples collected by perf for this process, so those collected by the runtime profiler
-            # are dropped.
+            # no samples collected by perf for this process - preserve runtime profiler samples as-is
             perf_samples_count = 0
         else:
             perf_samples_count = sum(process_perf.stacks.values())
@@ -267,14 +272,24 @@ def merge_profiles(
         profile_samples_count = sum(profile.stacks.values())
         assert profile_samples_count > 0
 
-        if process_perf is not None and perf_samples_count > 0 and ProfilingErrorStack.is_error_stack(profile.stacks):
-            # runtime profiler returned an error stack; extend it with perf profiler stacks for the pid
-            profile.stacks = ProfilingErrorStack.attach_error_to_stacks(process_perf.stacks, profile.stacks)
-        else:
+        if (
+            process_perf is not None
+            and perf_samples_count > 0
+            and not ProfilingErrorStack.is_error_stack(profile.stacks)
+        ):
             # do the scaling by the ratio of samples: samples we received from perf for this process,
             # divided by samples we received from the runtime profiler of this process.
             ratio = perf_samples_count / profile_samples_count
             profile.stacks = scale_sample_counts(profile.stacks, ratio)
+        elif process_perf is not None and perf_samples_count > 0 and ProfilingErrorStack.is_error_stack(profile.stacks):
+            # runtime profiler returned an error stack; attach error information to perf profiler stacks
+            profile.stacks = ProfilingErrorStack.attach_error_to_stacks(process_perf.stacks, profile.stacks)
+        elif perf_samples_count == 0 and not ProfilingErrorStack.is_error_stack(profile.stacks):
+            # perf has no samples, but runtime profiler has valid samples - preserve them unscaled
+            pass
+        else:
+            # perf has no samples and runtime profiler has error stack - discard the error stack
+            profile.stacks = StackToSampleCount()
 
         if process_perf is not None:
             if profile.container_name in [None, ""]:
