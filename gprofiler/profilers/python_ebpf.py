@@ -77,8 +77,9 @@ class PythonEbpfProfiler(ProfilerBase):
         add_versions: bool,
         user_stacks_pages: Optional[int] = None,
         verbose: bool,
+        min_duration: int = 0,
     ):
-        super().__init__(frequency, duration, profiler_state)
+        super().__init__(frequency, duration, profiler_state, min_duration)
         self.process: Optional[Popen] = None
         self.process_selector: Optional[selectors.BaseSelector] = None
         self.output_path = Path(self._profiler_state.storage_dir) / f"pyperf.{random_prefix()}.col"

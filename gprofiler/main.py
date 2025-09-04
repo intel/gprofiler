@@ -539,6 +539,15 @@ def parse_cmd_args() -> configargparse.Namespace:
         help="Profiler duration per session in seconds (default: %(default)s)",
     )
     parser.add_argument(
+        "--min-duration",
+        type=positive_integer,
+        dest="min_duration",
+        default=0,
+        help="Minimum process age in seconds before profiling (default: %(default)s). "
+        "Processes younger than this will be skipped to avoid profiling short-lived processes. "
+        "Set to 0 to disable short-lived process skipping",
+    )
+    parser.add_argument(
         "--insert-dso-name",
         action="store_true",
         default=False,
