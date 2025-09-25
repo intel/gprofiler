@@ -135,7 +135,7 @@ def start_process(
         env=env,
         **kwargs,
     )
-    _processes.append(process)
+
     return process
 
 
@@ -150,14 +150,6 @@ def wait_event(timeout: float, stop_event: Event, condition: Callable[[], bool],
 
         if time.monotonic() > end_time:
             raise TimeoutError()
-
-
-def poll_process(process: Popen, timeout: float, stop_event: Event) -> None:
-    try:
-        wait_event(timeout, stop_event, lambda: process.poll() is not None)
-    except StopEventSetException:
-        process.kill()
-        raise
 
 
 def remove_files_by_prefix(prefix: str) -> None:
@@ -264,6 +256,7 @@ def run_process(
             reraise_exc = e
         retcode = process.poll()
         assert retcode is not None  # only None if child has not terminated
+        cleanup_process_reference(process)
 
     result: CompletedProcess[bytes] = CompletedProcess(process.args, retcode, stdout, stderr)
 
@@ -524,9 +517,19 @@ def is_profiler_disabled(profile_mode: str) -> bool:
     return profile_mode in ("none", "disabled")
 
 
+def cleanup_process_reference(process: Popen) -> None:
+    """Remove process from global _processes list"""
+    try:
+        _processes.remove(process)
+    except ValueError:
+        pass  # Already removed
+
+
 def _exit_handler() -> None:
     for process in _processes:
         process.kill()
+        # remove process in _processes
+        cleanup_process_reference(process)
 
 
 def _sigint_handler(sig: int, frame: Optional[FrameType]) -> None:
