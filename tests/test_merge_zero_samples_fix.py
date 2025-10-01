@@ -6,15 +6,22 @@ where perf returns 0 samples but runtime profilers have valid samples.
 This addresses the issue: "However, this cause perf returning 0 samples and will break
 run time profilers during merge logic. So we also need to fix the merge logic."
 """
+from __future__ import annotations
 
 import unittest
 from collections import Counter
-from typing import Dict
+from typing import Any, Dict, List, Optional
 
 
 # Mock the required types and classes
 class MockProfileData:
-    def __init__(self, stacks: Dict[str, int], app_metadata=None, container_name=None, appid=None):
+    def __init__(
+        self,
+        stacks: Dict[str, int],
+        app_metadata: Optional[Dict[str, Any]] = None,
+        container_name: Optional[str] = None,
+        appid: Optional[str] = None,
+    ) -> None:
         self.stacks = Counter(stacks)
         self.app_metadata = app_metadata or {}
         self.container_name = container_name
@@ -23,24 +30,24 @@ class MockProfileData:
 
 class MockProfilingErrorStack:
     @staticmethod
-    def is_error_stack(stacks):
+    def is_error_stack(stacks: Counter[str]) -> bool:
         # Simple mock - check if any stack contains "error"
         return any("error" in stack.lower() for stack in stacks.keys())
 
     @staticmethod
-    def attach_error_to_stacks(perf_stacks, error_stacks):
+    def attach_error_to_stacks(perf_stacks: Counter[str], error_stacks: Counter[str]) -> Counter[str]:
         # Simple mock - combine the stacks
-        combined = Counter(perf_stacks)
+        combined: Counter[str] = Counter(perf_stacks)
         combined.update(error_stacks)
         return combined
 
 
-def mock_scale_sample_counts(stacks, ratio):
+def mock_scale_sample_counts(stacks: Counter[str], ratio: float) -> Counter[str]:
     """Mock implementation of scale_sample_counts"""
     if ratio == 1:
         return stacks
 
-    scaled_stacks = Counter()
+    scaled_stacks: Counter[str] = Counter()
     for stack, count in stacks.items():
         new_count = int(count * ratio)
         if new_count > 0:
@@ -51,7 +58,7 @@ def mock_scale_sample_counts(stacks, ratio):
 class TestMergeZeroSamplesFix(unittest.TestCase):
     """Test the merge logic fix for handling 0 samples from perf"""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test fixtures"""
         self.sample_runtime_stacks = {
             "process_name;main;function_a": 100,
@@ -64,7 +71,7 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
             "process_name;native_func": 40,
         }
 
-    def test_merge_with_zero_perf_samples_preserves_runtime_stacks(self):
+    def test_merge_with_zero_perf_samples_preserves_runtime_stacks(self) -> None:
         """Test that when perf returns 0 samples, runtime profiler stacks are preserved unscaled"""
 
         # Simulate the scenario: runtime profiler has samples, perf has 0 samples
@@ -90,7 +97,7 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
         self.assertEqual(result_stacks, Counter(self.sample_runtime_stacks))
         self.assertEqual(sum(result_stacks.values()), 175)
 
-    def test_merge_with_nonzero_perf_samples_scales_correctly(self):
+    def test_merge_with_nonzero_perf_samples_scales_correctly(self) -> None:
         """Test that when perf has samples, scaling works correctly"""
 
         runtime_profile = MockProfileData(self.sample_runtime_stacks)
@@ -116,7 +123,7 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
         # Allow for some rounding differences
         self.assertLessEqual(abs(actual_total - expected_total), 5)
 
-    def test_old_logic_would_eliminate_runtime_samples(self):
+    def test_old_logic_would_eliminate_runtime_samples(self) -> None:
         """Demonstrate that the old logic would eliminate valuable runtime profiler samples"""
 
         runtime_profile = MockProfileData(self.sample_runtime_stacks)
@@ -153,7 +160,7 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
             f"{sum(preserved.values())} samples (ALL PRESERVED)"
         )
 
-    def test_gpu_segfault_scenario(self):
+    def test_gpu_segfault_scenario(self) -> None:
         """Test the specific GPU segfault scenario mentioned in the issue"""
 
         # GPU segfault scenario:
@@ -196,7 +203,7 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
                 self.assertGreater(sum(result_stacks.values()), 0)
                 print(f"✅ {process_type}: Preserved {sum(result_stacks.values())} samples from runtime profiler")
 
-    def test_error_stack_handling_with_zero_perf_samples(self):
+    def test_error_stack_handling_with_zero_perf_samples(self) -> None:
         """Test error stack handling when perf has 0 samples"""
 
         # Runtime profiler returns an error stack
@@ -219,12 +226,12 @@ class TestMergeZeroSamplesFix(unittest.TestCase):
         self.assertEqual(result_stacks, Counter(error_stacks))
 
 
-def run_interactive_demo():
+def run_interactive_demo() -> None:
     """Run an interactive demonstration of the merge logic fix"""
     print("🧪 Merge Logic Fix - GPU Segfault Scenario Demo")
     print("=" * 70)
 
-    scenarios = [
+    scenarios: List[Dict[str, Any]] = [
         {
             "name": "GPU Segfault - Python Process",
             "runtime_stacks": {
