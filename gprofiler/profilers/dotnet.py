@@ -79,8 +79,9 @@ class DotnetProfiler(ProcessProfilerBase):
         duration: int,
         profiler_state: ProfilerState,
         dotnet_mode: str,
+        min_duration: int = 0,
     ):
-        super().__init__(frequency, duration, profiler_state)
+        super().__init__(frequency, duration, profiler_state, min_duration)
         assert (
             dotnet_mode == "dotnet-trace"
         ), "Dotnet profiler should not be initialized, wrong dotnet-trace value given"
