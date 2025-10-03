@@ -37,6 +37,7 @@ class PerfProcess:
     # default number of pages used by "perf record" when perf_event_mlock_kb=516
     # we use double for dwarf.
     _MMAP_SIZES = {"fp": 129, "dwarf": 257}
+    _RSS_GROWTH_THRESHOLD = 100 * 1024 * 1024  # 100MB in bytes
 
     def __init__(
         self,
@@ -65,6 +66,7 @@ class PerfProcess:
         self._extra_args = extra_args
         self._switch_timeout_s = switch_timeout_s
         self._process: Optional[Popen] = None
+        self._initial_rss: Optional[int] = None
 
     @property
     def _log_name(self) -> str:
@@ -146,15 +148,26 @@ class PerfProcess:
         """Checks if perf used memory exceeds threshold, and if it does, restarts perf"""
         assert self._process is not None
         perf_rss = Process(self._process.pid).memory_info().rss
+
+        if self._initial_rss is None:
+            self._initial_rss = perf_rss
+            logger.debug(
+                    f"perf process  {self._log_name} initial rss",
+                    perf_rss=perf_rss,
+               )
+
         if (
-            time.monotonic() - self._start_time >= self._RESTART_AFTER_S
-            and perf_rss >= self._PERF_MEMORY_USAGE_THRESHOLD
+            (time.monotonic() - self._start_time >= self._RESTART_AFTER_S
+            and perf_rss >= self._PERF_MEMORY_USAGE_THRESHOLD)
+            or (perf_rss-self._initial_rss) > self._RSS_GROWTH_THRESHOLD
         ):
             logger.debug(
                 f"Restarting {self._log_name} due to memory exceeding limit",
                 limit_rss=self._PERF_MEMORY_USAGE_THRESHOLD,
+                initial_rss=perf_rss-self._initial_rss,
                 perf_rss=perf_rss,
             )
+            self._initial_rss = None
             self.restart()
 
     def switch_output(self) -> None:
@@ -191,6 +204,17 @@ class PerfProcess:
             # (unlike Popen.communicate())
             if self._process is not None and self._process.stderr is not None:
                 logger.debug(f"{self._log_name} run output", perf_stderr=self._process.stderr.read1())  # type: ignore
+            # Safely drain stdout buffer without interfering with error handling
+            if self._process is not None and self._process.stdout is not None:
+                try:
+                    # Use read1() to avoid blocking, but don't necessarily log it
+                    stdout_data = self._process.stdout.read1()
+                    # Only log if there's unexpected stdout data (diagnostic value)
+                    if stdout_data:
+                        logger.debug(f"{self._log_name} unexpected stdout", perf_stdout=stdout_data)
+                except (OSError, IOError):
+                    # Handle case where stdout is already closed/broken
+                    pass
 
         try:
             inject_data = Path(f"{str(perf_data)}.inject")
