@@ -152,19 +152,18 @@ class PerfProcess:
         if self._initial_rss is None:
             self._initial_rss = perf_rss
             logger.debug(
-                    f"perf process  {self._log_name} initial rss",
-                    perf_rss=perf_rss,
-               )
+                f"perf process  {self._log_name} initial rss",
+                perf_rss=perf_rss,
+            )
 
         if (
-            (time.monotonic() - self._start_time >= self._RESTART_AFTER_S
-            and perf_rss >= self._PERF_MEMORY_USAGE_THRESHOLD)
-            or (perf_rss-self._initial_rss) > self._RSS_GROWTH_THRESHOLD
-        ):
+            time.monotonic() - self._start_time >= self._RESTART_AFTER_S
+            and perf_rss >= self._PERF_MEMORY_USAGE_THRESHOLD
+        ) or (perf_rss - self._initial_rss) > self._RSS_GROWTH_THRESHOLD:
             logger.debug(
                 f"Restarting {self._log_name} due to memory exceeding limit",
                 limit_rss=self._PERF_MEMORY_USAGE_THRESHOLD,
-                initial_rss=perf_rss-self._initial_rss,
+                initial_rss=perf_rss - self._initial_rss,
                 perf_rss=perf_rss,
             )
             self._initial_rss = None

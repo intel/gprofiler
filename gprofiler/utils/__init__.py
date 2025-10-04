@@ -195,10 +195,10 @@ def reap_process(process: Popen) -> Tuple[int, bytes, bytes]:
     if process.poll() is not None:
         # Process already exited, just collect any remaining output
         try:
-            stdout = process.stdout.read() if process.stdout and not process.stdout.closed else b''
-            stderr = process.stderr.read() if process.stderr and not process.stderr.closed else b''
+            stdout = process.stdout.read() if process.stdout and not process.stdout.closed else b""
+            stderr = process.stderr.read() if process.stderr and not process.stderr.closed else b""
         except Exception:
-            stdout, stderr = b'', b''
+            stdout, stderr = b"", b""
         return process.returncode, stdout, stderr
 
     # Process still running, try normal communicate
@@ -209,10 +209,11 @@ def reap_process(process: Popen) -> Tuple[int, bytes, bytes]:
         if "flush of closed file" in str(e):
             # Handle the race condition gracefully
             returncode = process.wait()
-            stdout, stderr = b'', b''
+            stdout, stderr = b"", b""
             return returncode, stdout, stderr
         else:
             raise
+
 
 def _kill_and_reap_process(process: Popen, kill_signal: signal.Signals) -> Tuple[int, bytes, bytes]:
     process.send_signal(kill_signal)
