@@ -207,7 +207,7 @@ class PerfProcess:
             if self._process is not None and self._process.stdout is not None:
                 try:
                     # Use read1() to avoid blocking, but don't necessarily log it
-                    stdout_data = self._process.stdout.read1()
+                    stdout_data = self._process.stdout.read1()  # type: ignore
                     # Only log if there's unexpected stdout data (diagnostic value)
                     if stdout_data:
                         logger.debug(f"{self._log_name} unexpected stdout", perf_stdout=stdout_data)
