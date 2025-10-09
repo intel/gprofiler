@@ -38,6 +38,7 @@ class PerfProcess:
     # we use double for dwarf.
     _MMAP_SIZES = {"fp": 129, "dwarf": 257}
     _RSS_GROWTH_THRESHOLD = 100 * 1024 * 1024  # 100MB in bytes
+    _BASELINE_COLLECTION_COUNT = 3  # Number of function calls to collect RSS before setting baseline
 
     def __init__(
         self,
@@ -66,7 +67,8 @@ class PerfProcess:
         self._extra_args = extra_args
         self._switch_timeout_s = switch_timeout_s
         self._process: Optional[Popen] = None
-        self._initial_rss: Optional[int] = None
+        self._baseline_rss: Optional[int] = None
+        self._collected_rss_values: List[int] = []
 
     @property
     def _log_name(self) -> str:
@@ -134,6 +136,7 @@ class PerfProcess:
 
     def restart(self) -> None:
         self.stop()
+        self._clear_baseline_data()
         self.start()
 
     def restart_if_not_running(self) -> None:
@@ -147,27 +150,49 @@ class PerfProcess:
     def restart_if_rss_exceeded(self) -> None:
         """Checks if perf used memory exceeds threshold, and if it does, restarts perf"""
         assert self._process is not None
-        perf_rss = Process(self._process.pid).memory_info().rss
+        current_rss = Process(self._process.pid).memory_info().rss
 
-        if self._initial_rss is None:
-            self._initial_rss = perf_rss
+        # Collect RSS readings for baseline calculation
+        if self._baseline_rss is None:
+            self._collected_rss_values.append(current_rss)
+
+            if len(self._collected_rss_values) < self._BASELINE_COLLECTION_COUNT:
+                return  # Still collecting, don't check thresholds yet
+
+            # Calculate average from collected samples
+            self._baseline_rss = sum(self._collected_rss_values) // len(self._collected_rss_values)
             logger.debug(
-                f"perf process  {self._log_name} initial rss",
-                perf_rss=perf_rss,
+                f"RSS baseline established for {self._log_name}",
+                collected_samples=self._collected_rss_values,
+                calculated_baseline=self._baseline_rss,
             )
 
-        if (
-            time.monotonic() - self._start_time >= self._RESTART_AFTER_S
-            and perf_rss >= self._PERF_MEMORY_USAGE_THRESHOLD
-        ) or (perf_rss - self._initial_rss) > self._RSS_GROWTH_THRESHOLD:
+        # Now check memory thresholds with established baseline
+        memory_growth = current_rss - self._baseline_rss
+        time_elapsed = time.monotonic() - self._start_time
+
+        should_restart_time_based = (
+            time_elapsed >= self._RESTART_AFTER_S and current_rss >= self._PERF_MEMORY_USAGE_THRESHOLD
+        )
+        should_restart_growth_based = memory_growth > self._RSS_GROWTH_THRESHOLD
+
+        if should_restart_time_based or should_restart_growth_based:
+            restart_cause = "time+memory limits" if should_restart_time_based else "memory growth"
             logger.debug(
-                f"Restarting {self._log_name} due to memory exceeding limit",
-                limit_rss=self._PERF_MEMORY_USAGE_THRESHOLD,
-                initial_rss=perf_rss - self._initial_rss,
-                perf_rss=perf_rss,
+                f"Restarting {self._log_name} due to {restart_cause}",
+                current_rss=current_rss,
+                baseline_rss=self._baseline_rss,
+                memory_growth=memory_growth,
+                time_elapsed=time_elapsed,
+                threshold_limit=self._PERF_MEMORY_USAGE_THRESHOLD,
             )
-            self._initial_rss = None
+            self._clear_baseline_data()
             self.restart()
+
+    def _clear_baseline_data(self) -> None:
+        """Reset baseline tracking for next process instance"""
+        self._baseline_rss = None
+        self._collected_rss_values = []
 
     def switch_output(self) -> None:
         assert self._process is not None, "profiling not started!"
