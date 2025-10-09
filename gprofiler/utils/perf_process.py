@@ -2,9 +2,9 @@ import os
 import signal
 import time
 from pathlib import Path
-from subprocess import Popen
+from subprocess import PIPE, Popen
 from threading import Event
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 from psutil import Process
 
@@ -165,7 +165,15 @@ class PerfProcess:
         remove_files_by_prefix(f"{self._output_path}.")
         self._process.send_signal(signal.SIGUSR2)
 
-    def wait_and_script(self) -> str:
+    def wait_and_script(self) -> Iterator[str]:
+        """
+        Stream perf script output line by line to avoid loading entire output into memory.
+        Yields each sample line as it's processed.
+        """
+        perf_data = None
+        inject_data = None
+        perf_script_proc = None
+
         try:
             perf_data = wait_for_file_by_prefix(f"{self._output_path}.", self._DUMP_TIMEOUT_S, self._stop_event)
         except Exception:
@@ -202,21 +210,46 @@ class PerfProcess:
                 perf_data = inject_data
 
             perf_script_cmd = [perf_path(), "script", "-F", "+pid", "-i", str(perf_data)]
-            try:
-                perf_script_proc = run_process(
-                    perf_script_cmd,
-                    suppress_log=True,
-                )
-            except CalledProcessError as e:
+
+            # Use Popen directly for streaming instead of run_process
+            perf_script_proc = Popen(
+                perf_script_cmd, stdout=PIPE, stderr=PIPE, text=True, encoding="utf8", errors="replace"
+            )
+
+            # Stream output line by line
+            if perf_script_proc.stdout is not None:
+                for line in perf_script_proc.stdout:
+                    yield line.rstrip("\n")
+
+            # Wait for process to complete and check return code
+            perf_script_proc.wait()
+            if perf_script_proc.returncode != 0:
+                stderr_output = perf_script_proc.stderr.read() if perf_script_proc.stderr is not None else ""
                 logger.critical(
-                    f"{self._log_name} failed to run perf script: {str(e)}",
+                    f"{self._log_name} failed to run perf script",
                     command=" ".join(perf_script_cmd),
+                    stderr=stderr_output,
                 )
-                return ""
-            return perf_script_proc.stdout.decode("utf8")
+
+            # Explicit return after successful streaming
+            return
+
+        except Exception as e:
+            logger.critical(
+                f"{self._log_name} failed to run perf script: {str(e)}",
+                command=" ".join(perf_script_cmd),
+            )
+            raise
         finally:
-            perf_data.unlink()
-            if self._inject_jit:
-                # might be missing if it's already removed.
-                # might be existing if "perf inject" itself fails
+            # Cleanup resources
+            if perf_script_proc is not None:
+                try:
+                    perf_script_proc.terminate()
+                    perf_script_proc.wait(timeout=5)
+                except (OSError, TimeoutError):
+                    pass
+
+            if perf_data is not None:
+                remove_path(perf_data, missing_ok=True)
+            if self._inject_jit and inject_data is not None:
                 remove_path(inject_data, missing_ok=True)

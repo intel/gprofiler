@@ -41,7 +41,7 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.node import clean_up_node_maps, generate_map_for_node_processes, get_node_processes
 from gprofiler.profilers.profiler_base import ProfilerBase
 from gprofiler.profilers.registry import ProfilerArgument, register_profiler
-from gprofiler.utils.perf import discover_appropriate_perf_event, parse_perf_script, valid_perf_pid
+from gprofiler.utils.perf import discover_appropriate_perf_event, parse_perf_script_from_iterator, valid_perf_pid
 from gprofiler.utils.perf_process import PerfProcess
 
 logger = get_logger_adapter(__name__)
@@ -99,37 +99,6 @@ def add_highest_avg_depth_stacks_per_process(
                 dwarf_collapsed_stacks_counters, fp_to_dwarf_sample_ratio
             )
             merged_pid_to_stacks_counters[pid] = dwarf_collapsed_stacks_counters
-
-
-def merge_global_perfs(
-    raw_fp_perf: Optional[str], raw_dwarf_perf: Optional[str], insert_dso_name: bool = False
-) -> ProcessToStackSampleCounters:
-    fp_perf = parse_perf_script(raw_fp_perf, insert_dso_name)
-    dwarf_perf = parse_perf_script(raw_dwarf_perf, insert_dso_name)
-
-    if raw_fp_perf is None:
-        return dwarf_perf
-    elif raw_dwarf_perf is None:
-        return fp_perf
-
-    total_fp_samples = sum([sum(stacks.values()) for stacks in fp_perf.values()])
-    total_dwarf_samples = sum([sum(stacks.values()) for stacks in dwarf_perf.values()])
-    if total_dwarf_samples == 0:
-        fp_to_dwarf_sample_ratio = 0.0  # ratio can be 0 because if total_dwarf_samples is 0 then it will be never used
-    else:
-        fp_to_dwarf_sample_ratio = total_fp_samples / total_dwarf_samples
-
-    # The FP perf is used here as the "main" perf, to which the DWARF perf is scaled.
-    merged_pid_to_stacks_counters: ProcessToStackSampleCounters = defaultdict(Counter)
-    add_highest_avg_depth_stacks_per_process(
-        dwarf_perf, fp_perf, fp_to_dwarf_sample_ratio, merged_pid_to_stacks_counters
-    )
-    total_merged_samples = sum([sum(stacks.values()) for stacks in merged_pid_to_stacks_counters.values()])
-    logger.debug(
-        f"Total FP samples: {total_fp_samples}; Total DWARF samples: {total_dwarf_samples}; "
-        f"FP to DWARF ratio: {fp_to_dwarf_sample_ratio}; Total merged samples: {total_merged_samples}"
-    )
-    return merged_pid_to_stacks_counters
 
 
 @register_profiler(
@@ -298,16 +267,62 @@ class SystemProfiler(ProfilerBase):
         for perf in self._perfs:
             perf.switch_output()
 
-        data = {
-            k: self._generate_profile_data(v, k)
-            for k, v in merge_global_perfs(
-                self._perf_fp.wait_and_script() if self._perf_fp is not None else None,
-                self._perf_dwarf.wait_and_script() if self._perf_dwarf is not None else None,
+        # Use streaming parsing for better memory efficiency
+        fp_perf_data = (
+            parse_perf_script_from_iterator(
+                self._perf_fp.wait_and_script(),
                 self._profiler_state.insert_dso_name,
-            ).items()
-        }
+            )
+            if self._perf_fp is not None
+            else defaultdict(Counter)
+        )
+
+        dwarf_perf_data = (
+            parse_perf_script_from_iterator(
+                self._perf_dwarf.wait_and_script(),
+                self._profiler_state.insert_dso_name,
+            )
+            if self._perf_dwarf is not None
+            else defaultdict(Counter)
+        )
+
+        # Merge the results
+        merged_data = self._merge_fp_and_dwarf_results(fp_perf_data, dwarf_perf_data)
+
+        data = {k: self._generate_profile_data(v, k) for k, v in merged_data.items()}
 
         return data
+
+    def _merge_fp_and_dwarf_results(
+        self, fp_perf: ProcessToStackSampleCounters, dwarf_perf: ProcessToStackSampleCounters
+    ) -> ProcessToStackSampleCounters:
+        """Merge FP and DWARF results using the existing merge logic."""
+        if not fp_perf:
+            return dwarf_perf
+        elif not dwarf_perf:
+            return fp_perf
+
+        # Calculate sample ratios
+        total_fp_samples = sum([sum(stacks.values()) for stacks in fp_perf.values()])
+        total_dwarf_samples = sum([sum(stacks.values()) for stacks in dwarf_perf.values()])
+
+        if total_dwarf_samples == 0:
+            fp_to_dwarf_sample_ratio = 0.0
+        else:
+            fp_to_dwarf_sample_ratio = total_fp_samples / total_dwarf_samples
+
+        merged_pid_to_stacks_counters: ProcessToStackSampleCounters = defaultdict(Counter)
+        add_highest_avg_depth_stacks_per_process(
+            dwarf_perf, fp_perf, fp_to_dwarf_sample_ratio, merged_pid_to_stacks_counters
+        )
+
+        total_merged_samples = sum([sum(stacks.values()) for stacks in merged_pid_to_stacks_counters.values()])
+        logger.debug(
+            f"Total FP samples: {total_fp_samples}; Total DWARF samples: {total_dwarf_samples}; "
+            f"FP to DWARF ratio: {fp_to_dwarf_sample_ratio}; Total merged samples: {total_merged_samples}"
+        )
+
+        return merged_pid_to_stacks_counters
 
     def _generate_profile_data(self, stacks: StackToSampleCount, pid: int) -> ProfileData:
         metadata = self._get_metadata(pid)
