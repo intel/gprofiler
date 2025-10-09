@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from enum import Enum
 from pathlib import Path
 from threading import Event
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 from psutil import Process
 
@@ -84,8 +84,6 @@ def discover_appropriate_perf_event(
     """
 
     for event in SupportedPerfEvent:
-        perf_script_output = None
-
         try:
             current_extra_args = event.perf_extra_args() + [
                 "--",
@@ -103,7 +101,8 @@ def discover_appropriate_perf_event(
                 switch_timeout_s=15,
             )
             perf_process.start()
-            parsed_perf_script = parse_perf_script(perf_process.wait_and_script())
+            # Use streaming parsing instead of loading all into memory
+            parsed_perf_script = parse_perf_script_from_iterator(perf_process.wait_and_script(), insert_dso_name=False)
             if len(parsed_perf_script) > 0:
                 # `perf script` isn't empty, we'll use this event.
                 return event
@@ -112,7 +111,6 @@ def discover_appropriate_perf_event(
                 "Failed to collect samples for perf event",
                 exc_info=True,
                 perf_event=event.name,
-                perf_script_output=perf_script_output,
             )
         finally:
             perf_process.stop()
@@ -129,7 +127,7 @@ def can_i_use_perf_events() -> bool:
     except CalledProcessError as e:
         assert isinstance(e.stderr, str), f"unexpected type {type(e.stderr)}"
 
-        # perf's output upon start error (e.g due to permissions denied error)
+        # perf's output upon start error (e.g. due to permissions denied error)
         if not (
             e.returncode == 255
             and (
@@ -176,28 +174,53 @@ def collapse_stack(comm: str, stack: str, insert_dso_name: bool = False) -> str:
     return ";".join(funcs)
 
 
-def parse_perf_script(script: Optional[str], insert_dso_name: bool = False) -> ProcessToStackSampleCounters:
+def parse_perf_script_from_iterator(
+    perf_iterator: Iterator[str], insert_dso_name: bool = False
+) -> ProcessToStackSampleCounters:
+    """
+    Parse perf script output from an iterator to avoid loading entire output into memory.
+    """
     pid_to_collapsed_stacks_counters: ProcessToStackSampleCounters = defaultdict(Counter)
 
-    if script is None:
-        return pid_to_collapsed_stacks_counters
+    current_sample_lines: List[str] = []
 
-    for sample in script.split("\n\n"):
-        try:
-            if sample.strip() == "":
-                continue
-            if sample.startswith("#"):
-                continue
-            match = SAMPLE_REGEX.match(sample)
-            if match is None:
-                raise Exception("Failed to match sample")
-            sample_dict = match.groupdict()
+    for line in perf_iterator:
+        # Empty line indicates end of sample block
+        if line.strip() == "":
+            if current_sample_lines:
+                # Process the accumulated sample
+                sample = "\n".join(current_sample_lines)
+                _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
+                current_sample_lines = []
+        else:
+            # Accumulate lines for current sample
+            current_sample_lines.append(line)
 
-            pid = int(sample_dict["pid"])
-            comm = sample_dict["comm"]
-            stack = sample_dict["stack"]
-            if stack is not None:
-                pid_to_collapsed_stacks_counters[pid][collapse_stack(comm, stack, insert_dso_name)] += 1
-        except Exception:
-            logger.exception(f"Error processing sample: {sample}")
+    # Process final sample if no trailing empty line
+    if current_sample_lines:
+        sample = "\n".join(current_sample_lines)
+        _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
+
     return pid_to_collapsed_stacks_counters
+
+
+def _process_single_sample(
+    sample: str, pid_to_collapsed_stacks_counters: ProcessToStackSampleCounters, insert_dso_name: bool
+) -> None:
+    """Helper function to process a single sample and update counters."""
+    try:
+        if sample.strip() == "" or sample.startswith("#"):
+            return
+
+        match = SAMPLE_REGEX.match(sample)
+        if match is None:
+            raise Exception("Failed to match sample")
+        sample_dict = match.groupdict()
+
+        pid = int(sample_dict["pid"])
+        comm = sample_dict["comm"]
+        stack = sample_dict["stack"]
+        if stack is not None:
+            pid_to_collapsed_stacks_counters[pid][collapse_stack(comm, stack, insert_dso_name)] += 1
+    except Exception:
+        logger.exception(f"Error processing sample: {sample}")
