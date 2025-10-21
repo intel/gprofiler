@@ -187,24 +187,6 @@ class ProcessProfilerBase(ProfilerBase):
         except (NoSuchProcess, ZombieProcess):
             return 0.0
 
-    def _estimate_process_duration(self, process: Process) -> int:
-        """
-        Simple duration estimation: use shorter duration for very young processes.
-        """
-        try:
-            process_age = self._get_process_age(process)
-
-            # Very young processes (< 5 seconds) get minimal profiling duration
-            # This catches most short-lived tools without complex heuristics
-            if process_age < 5.0:
-                return self._min_duration  # configurable minimum duration for very young processes
-
-            # Processes running longer get full duration
-            return self._duration
-
-        except Exception:
-            return self._duration  # Conservative fallback
-
     @staticmethod
     def _profiling_error_stack(
         what: str,
