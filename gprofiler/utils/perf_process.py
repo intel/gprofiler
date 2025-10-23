@@ -8,7 +8,6 @@ from typing import Iterator, List, Optional
 
 from psutil import Process
 
-from gprofiler.exceptions import CalledProcessError
 from gprofiler.log import get_logger_adapter
 from gprofiler.utils import (
     cleanup_process_reference,
