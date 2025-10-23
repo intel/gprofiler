@@ -179,8 +179,9 @@ class SystemProfiler(ProfilerBase):
         perf_inject: bool,
         perf_node_attach: bool,
         perf_memory_restart: bool,
+        min_duration: int = 0,
     ):
-        super().__init__(frequency, duration, profiler_state)
+        super().__init__(frequency, duration, profiler_state, min_duration)
         self._perfs: List[PerfProcess] = []
         self._metadata_collectors: List[PerfMetadata] = [
             GolangPerfMetadata(self._profiler_state.stop_event),
