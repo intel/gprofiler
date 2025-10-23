@@ -117,6 +117,7 @@ class TestShortLivedProcessFix(unittest.TestCase):
 
     def test_error_scenarios(self):
         """Test error handling scenarios"""
+
         # Test with a process that raises an exception
         class ErrorProcess:
             def __init__(self, pid):
