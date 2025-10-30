@@ -51,42 +51,42 @@ class TestProfilerBase:
 class TestShortLivedProcessFix(unittest.TestCase):
     """Unit tests for short-lived process fix functionality"""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test fixtures"""
         self.profiler = TestProfilerBase(min_duration=10)
         self.current_time = time.time()
 
-    def test_very_young_process_is_skipped(self):
+    def test_very_young_process_is_skipped(self) -> None:
         """Test that processes younger than 5 seconds are skipped"""
         process = MockProcess(pid=1001, create_time=self.current_time - 2.0)
         self.assertTrue(self.profiler.should_skip_young_process(process))
 
-    def test_young_process_is_skipped(self):
+    def test_young_process_is_skipped(self) -> None:
         """Test that processes younger than min_duration are skipped"""
         process = MockProcess(pid=1002, create_time=self.current_time - 5.0)
         self.assertTrue(self.profiler.should_skip_young_process(process))
 
-    def test_process_just_under_threshold_is_skipped(self):
+    def test_process_just_under_threshold_is_skipped(self) -> None:
         """Test that processes just under min_duration threshold are skipped"""
         process = MockProcess(pid=1003, create_time=self.current_time - 9.5)
         self.assertTrue(self.profiler.should_skip_young_process(process))
 
-    def test_process_at_threshold_is_not_skipped(self):
+    def test_process_at_threshold_is_not_skipped(self) -> None:
         """Test that processes exactly at min_duration threshold are not skipped"""
         process = MockProcess(pid=1004, create_time=self.current_time - 10.0)
         self.assertFalse(self.profiler.should_skip_young_process(process))
 
-    def test_older_process_is_not_skipped(self):
+    def test_older_process_is_not_skipped(self) -> None:
         """Test that processes older than min_duration are not skipped"""
         process = MockProcess(pid=1005, create_time=self.current_time - 15.0)
         self.assertFalse(self.profiler.should_skip_young_process(process))
 
-    def test_much_older_process_is_not_skipped(self):
+    def test_much_older_process_is_not_skipped(self) -> None:
         """Test that much older processes are not skipped"""
         process = MockProcess(pid=1006, create_time=self.current_time - 60.0)
         self.assertFalse(self.profiler.should_skip_young_process(process))
 
-    def test_custom_min_duration_threshold(self):
+    def test_custom_min_duration_threshold(self) -> None:
         """Test that custom min_duration threshold works correctly"""
         custom_profiler = TestProfilerBase(min_duration=5)
 
@@ -98,7 +98,7 @@ class TestShortLivedProcessFix(unittest.TestCase):
         old_process = MockProcess(pid=2002, create_time=self.current_time - 7.0)
         self.assertFalse(custom_profiler.should_skip_young_process(old_process))
 
-    def test_zero_min_duration_disables_skipping(self):
+    def test_zero_min_duration_disables_skipping(self) -> None:
         """Test that setting min_duration to 0 effectively disables skipping"""
         no_skip_profiler = TestProfilerBase(min_duration=0)
 
@@ -106,7 +106,7 @@ class TestShortLivedProcessFix(unittest.TestCase):
         very_young_process = MockProcess(pid=3001, create_time=self.current_time - 0.5)
         self.assertFalse(no_skip_profiler.should_skip_young_process(very_young_process))
 
-    def test_process_age_calculation_accuracy(self):
+    def test_process_age_calculation_accuracy(self) -> None:
         """Test that process age calculation is accurate"""
         test_age = 25.5
         process = MockProcess(pid=4001, create_time=self.current_time - test_age)
@@ -115,57 +115,57 @@ class TestShortLivedProcessFix(unittest.TestCase):
         # Allow for small timing differences (within 1 second)
         self.assertAlmostEqual(calculated_age, test_age, delta=1.0)
 
-    def test_error_scenarios(self):
+    def test_error_scenarios(self) -> None:
         """Test error handling scenarios"""
 
         # Test with a process that raises an exception
         class ErrorProcess:
-            def __init__(self, pid):
+            def __init__(self, pid: int) -> None:
                 self.pid = pid
 
-            def create_time(self):
+            def create_time(self) -> float:
                 raise Exception("Process not found")
 
         error_process = ErrorProcess(pid=5001)
         # Should return False (don't skip) when we can't determine age
-        self.assertFalse(self.profiler.should_skip_young_process(error_process))
+        self.assertFalse(self.profiler.should_skip_young_process(error_process))  # type: ignore[arg-type]
 
 
 class TestErrorReductionScenarios(unittest.TestCase):
     """Test realistic scenarios that demonstrate error reduction"""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test fixtures"""
         self.profiler = TestProfilerBase(min_duration=10)
         self.current_time = time.time()
 
-    def test_build_script_scenario(self):
+    def test_build_script_scenario(self) -> None:
         """Test that short-lived build scripts are skipped"""
         build_script = MockProcess(pid=6001, create_time=self.current_time - 1.5)
         self.assertTrue(self.profiler.should_skip_young_process(build_script))
 
-    def test_container_init_scenario(self):
+    def test_container_init_scenario(self) -> None:
         """Test that transient container init processes are skipped"""
         container_init = MockProcess(pid=6002, create_time=self.current_time - 3.0)
         self.assertTrue(self.profiler.should_skip_young_process(container_init))
 
-    def test_utility_command_scenario(self):
+    def test_utility_command_scenario(self) -> None:
         """Test that quick utility commands are skipped"""
         utility_cmd = MockProcess(pid=6003, create_time=self.current_time - 7.2)
         self.assertTrue(self.profiler.should_skip_young_process(utility_cmd))
 
-    def test_web_server_scenario(self):
+    def test_web_server_scenario(self) -> None:
         """Test that long-running web servers are not skipped"""
         web_server = MockProcess(pid=6004, create_time=self.current_time - 45.0)
         self.assertFalse(self.profiler.should_skip_young_process(web_server))
 
-    def test_database_scenario(self):
+    def test_database_scenario(self) -> None:
         """Test that database processes are not skipped"""
         database = MockProcess(pid=6005, create_time=self.current_time - 120.0)
         self.assertFalse(self.profiler.should_skip_young_process(database))
 
 
-def run_interactive_demo():
+def run_interactive_demo() -> bool:
     """Run an interactive demonstration of the fix"""
     print("🧪 Short-Lived Process Fix - Interactive Demo")
     print("=" * 60)

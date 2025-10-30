@@ -159,7 +159,8 @@ class RbSpyProfiler(SpawningProcessProfilerBase):
                 process_age = self._get_process_age(process)
                 if process_age < self._min_duration:
                     logger.debug(
-                        f"Skipping young Ruby process {process.pid} (age: {process_age:.1f}s < min_duration: {self._min_duration}s)"
+                        f"Skipping young Ruby process {process.pid} "
+                        f"(age: {process_age:.1f}s < min_duration: {self._min_duration}s)"
                     )
                     return False
             except Exception as e:
