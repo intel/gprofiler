@@ -59,7 +59,11 @@ class RubyMetadata(ApplicationMetadata):
         exe_elfid = get_elf_id(f"/proc/{process.pid}/exe")
         libruby_elfid = get_mapped_dso_elf_id(process, "/libruby")
 
-        metadata = {"ruby_version": version, "exe_elfid": exe_elfid, "libruby_elfid": libruby_elfid}
+        metadata = {
+            "ruby_version": version,
+            "exe_elfid": exe_elfid,
+            "libruby_elfid": libruby_elfid,
+        }
 
         metadata.update(super().make_application_metadata(process))
         return metadata
@@ -84,8 +88,9 @@ class RbSpyProfiler(SpawningProcessProfilerBase):
         duration: int,
         profiler_state: ProfilerState,
         ruby_mode: str,
+        min_duration: int = 0,
     ):
-        super().__init__(frequency, duration, profiler_state)
+        super().__init__(frequency, duration, profiler_state, min_duration)
         assert ruby_mode == "rbspy", "Ruby profiler should not be initialized, wrong ruby_mode value given"
         self._metadata = RubyMetadata(self._profiler_state.stop_event)
 
@@ -120,7 +125,10 @@ class RbSpyProfiler(SpawningProcessProfilerBase):
         app_metadata = self._metadata.get_metadata(process)
         appid = application_identifiers.get_ruby_app_id(process)
 
-        local_output_path = os.path.join(self._profiler_state.storage_dir, f"rbspy.{random_prefix()}.{process.pid}.col")
+        local_output_path = os.path.join(
+            self._profiler_state.storage_dir,
+            f"rbspy.{random_prefix()}.{process.pid}.col",
+        )
         with removed_path(local_output_path):
             try:
                 run_process(
@@ -134,11 +142,28 @@ class RbSpyProfiler(SpawningProcessProfilerBase):
 
             logger.info(f"Finished profiling process {process.pid} with rbspy")
             return ProfileData(
-                parse_one_collapsed_file(Path(local_output_path), comm), appid, app_metadata, container_name
+                parse_one_collapsed_file(Path(local_output_path), comm),
+                appid,
+                app_metadata,
+                container_name,
             )
 
     def _select_processes_to_profile(self) -> List[Process]:
         return pgrep_maps(self.DETECTED_RUBY_PROCESSES_REGEX)
 
     def _should_profile_process(self, process: Process) -> bool:
+        # Skip short-lived processes - if a process is younger than min_duration,
+        # it's likely to exit before profiling completes
+        if self._min_duration > 0:
+            try:
+                process_age = self._get_process_age(process)
+                if process_age < self._min_duration:
+                    logger.debug(
+                        f"Skipping young Ruby process {process.pid} "
+                        f"(age: {process_age:.1f}s < min_duration: {self._min_duration}s)"
+                    )
+                    return False
+            except Exception as e:
+                logger.debug(f"Could not determine age for Ruby process {process.pid}: {e}")
+
         return search_proc_maps(process, self.DETECTED_RUBY_PROCESSES_REGEX) is not None
