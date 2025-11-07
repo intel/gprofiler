@@ -290,7 +290,7 @@ runtime_image_listing: Dict[str, Dict[str, Dict[str, Any]]] = {
     "java": {
         "": {},
         "hotspot-jdk-8": {},  # add for clarity when testing with multiple JDKs
-        "hotspot-jdk-11": dict(buildargs={"JAVA_BASE_IMAGE": "openjdk:11-jdk"}),
+        "hotspot-jdk-11": dict(buildargs={"JAVA_BASE_IMAGE": "eclipse-temurin:11-jdk"}),
         "j9": dict(buildargs={"JAVA_BASE_IMAGE": "adoptopenjdk/openjdk8-openj9"}),
         "eclipse-temurin-latest": dict(buildargs={"JAVA_BASE_IMAGE": "eclipse-temurin:latest"}),
         "zing": dict(dockerfile="zing.Dockerfile"),
