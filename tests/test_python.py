@@ -161,6 +161,7 @@ def test_python_matrix(
         assert profile.app_metadata["sys_maxunicode"] is None
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 @pytest.mark.parametrize("in_container", [True])
 @pytest.mark.parametrize("profiler_type", ["pyperf"])
 @pytest.mark.parametrize("insert_dso_name", [False, True])

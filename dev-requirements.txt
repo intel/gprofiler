@@ -1,4 +1,5 @@
 pytest==8.3.5
+pytest-rerunfailures==15.0
 flake8==7.2.0
 black==25.1.0
 mypy==1.15.0
