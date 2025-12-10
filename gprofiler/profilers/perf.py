@@ -125,6 +125,30 @@ def add_highest_avg_depth_stacks_per_process(
             action="store_false",
             dest="perf_memory_restart",
         ),
+        ProfilerArgument(
+            "--perf-use-cgroups",
+            help="Use cgroup-based profiling instead of PID-based profiling for better reliability. "
+            "Profiles the top N cgroups by resource usage, avoiding crashes from invalid PIDs.",
+            action="store_true",
+            default=False,
+            dest="perf_use_cgroups",
+        ),
+        ProfilerArgument(
+            "--perf-max-cgroups",
+            help="Maximum number of cgroups to profile when using --perf-use-cgroups. Default: %(default)s",
+            type=int,
+            default=50,
+            dest="perf_max_cgroups",
+        ),
+        ProfilerArgument(
+            "--perf-max-docker-containers",
+            help="Maximum number of individual Docker containers to profile instead of the broad 'docker' cgroup. "
+            "When set, profiles the top N highest-resource individual containers rather than all containers together. "
+            "Set to 0 to use the broad 'docker' cgroup (default behavior). Default: %(default)s",
+            type=int,
+            default=0,
+            dest="perf_max_docker_containers",
+        ),
     ],
     disablement_help="Disable the global perf of processes,"
     " and instead only concatenate runtime-specific profilers results",
@@ -138,6 +162,10 @@ class SystemProfiler(ProfilerBase):
     versions of Go processes.
     """
 
+    def _is_system_wide_profiler(self) -> bool:
+        """Perf is a system-wide profiler that can be disabled on busy systems."""
+        return True
+
     def __init__(
         self,
         frequency: int,
@@ -148,6 +176,9 @@ class SystemProfiler(ProfilerBase):
         perf_inject: bool,
         perf_node_attach: bool,
         perf_memory_restart: bool,
+        perf_use_cgroups: bool = False,
+        perf_max_cgroups: int = 50,
+        perf_max_docker_containers: int = 0,
         min_duration: int = 0,
     ):
         super().__init__(frequency, duration, profiler_state, min_duration)
@@ -159,6 +190,12 @@ class SystemProfiler(ProfilerBase):
         self._node_processes: List[Process] = []
         self._node_processes_attached: List[Process] = []
         self._perf_memory_restart = perf_memory_restart
+        self._perf_mode = perf_mode
+        self._perf_dwarf_stack_size = perf_dwarf_stack_size
+        self._perf_inject = perf_inject
+        self._perf_use_cgroups = perf_use_cgroups
+        self._perf_max_cgroups = perf_max_cgroups
+        self._perf_max_docker_containers = perf_max_docker_containers
         switch_timeout_s = duration * 3  # allow gprofiler to be delayed up to 3 intervals before timing out.
         extra_args = []
         try:
@@ -184,6 +221,9 @@ class SystemProfiler(ProfilerBase):
                 extra_args=extra_args,
                 processes_to_profile=self._profiler_state.processes_to_profile,
                 switch_timeout_s=switch_timeout_s,
+                use_cgroups=self._perf_use_cgroups,
+                max_cgroups=self._perf_max_cgroups,
+                max_docker_containers=self._perf_max_docker_containers,
             )
             self._perfs.append(self._perf_fp)
         else:
@@ -200,6 +240,9 @@ class SystemProfiler(ProfilerBase):
                 extra_args=extra_args,
                 processes_to_profile=self._profiler_state.processes_to_profile,
                 switch_timeout_s=switch_timeout_s,
+                use_cgroups=self._perf_use_cgroups,
+                max_cgroups=self._perf_max_cgroups,
+                max_docker_containers=self._perf_max_docker_containers,
             )
             self._perfs.append(self._perf_dwarf)
         else:
