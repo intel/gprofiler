@@ -274,6 +274,11 @@ jobs:
     - name: Extract resources from gProfiler executable
       run: sudo ./output/gprofiler_x86_64 extract-resources --resources-dest=./gprofiler/resources
 
+    - name: Clean Docker resources
+      run: |
+        docker system prune -f --volumes
+        df -h
+
     # used in the tests
     - name: Import gProfiler image
       run: docker image load < output/gprofiler_x86_64.img
