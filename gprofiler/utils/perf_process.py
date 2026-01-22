@@ -142,7 +142,23 @@ class PerfProcess:
         # If no explicit events are provided but cgroups are used, add default event.
         # For multiple cgroups, perf requires one event per cgroup.
         extra_args = self._extra_args
-        if self._cgroup_args and not extra_args:
+        
+        # Separate extra_args into perf options and application command
+        # The "--" separator marks the boundary between perf args and the app command
+        perf_extra_args = []
+        app_command = []
+        separator_found = False
+        
+        for arg in extra_args:
+            if arg == "--":
+                separator_found = True
+                app_command.append(arg)
+            elif separator_found:
+                app_command.append(arg)
+            else:
+                perf_extra_args.append(arg)
+        
+        if self._cgroup_args and not perf_extra_args:
             # Count the number of cgroups (they are comma-separated in -G argument)
             cgroup_arg = None
             for i, arg in enumerate(self._cgroup_args):
@@ -153,12 +169,12 @@ class PerfProcess:
             if cgroup_arg:
                 num_cgroups = len(cgroup_arg.split(","))
                 # Add one event per cgroup (perf requirement)
-                extra_args = []
+                perf_extra_args = []
                 for _ in range(num_cgroups):
-                    extra_args.extend(["-e", "cycles"])
+                    perf_extra_args.extend(["-e", "cycles"])
             else:
                 # Fallback: single event
-                extra_args = ["-e", "cycles"]
+                perf_extra_args = ["-e", "cycles"]
 
         return (
             [
@@ -178,10 +194,11 @@ class PerfProcess:
                 "-m",
                 str(self._MMAP_SIZES[self._type]),
             ]
-            + extra_args  # Events must come before cgroups
+            + perf_extra_args  # Events must come before cgroups
             + self._pid_args
             + self._cgroup_args
             + (["-k", "1"] if self._inject_jit else [])
+            + app_command  # Application command (with "--") must be last
         )
 
     def start(self) -> None:
