@@ -48,6 +48,9 @@ class PerfProcess:
         extra_args: List[str],
         processes_to_profile: Optional[List[Process]],
         switch_timeout_s: int,
+        use_cgroups: bool = False,
+        max_cgroups: int = 50,
+        max_docker_containers: int = 0,
     ):
         self._start_time = 0.0
         self._frequency = frequency
@@ -55,12 +58,77 @@ class PerfProcess:
         self._output_path = output_path
         self._type = "dwarf" if is_dwarf else "fp"
         self._inject_jit = inject_jit
+        self._use_cgroups = use_cgroups
+        self._max_cgroups = max_cgroups
         self._pid_args = []
-        if processes_to_profile is not None:
+        self._cgroup_args = []
+
+        # Determine profiling strategy
+        if use_cgroups:
+            from gprofiler.utils.cgroup_utils import (
+                get_top_cgroup_names_for_perf,
+                is_cgroup_available,
+                validate_perf_cgroup_support,
+            )
+
+            # Use cgroup-based profiling for better reliability
+            if is_cgroup_available() and validate_perf_cgroup_support():
+                try:
+                    top_cgroups = get_top_cgroup_names_for_perf(max_cgroups, max_docker_containers)
+                    if top_cgroups:
+                        # Cgroup monitoring requires system-wide mode (-a)
+                        self._pid_args.append("-a")
+                        self._cgroup_args.extend(["-G", ",".join(top_cgroups)])
+                        logger.info(
+                            f"Using cgroup-based profiling with {len(top_cgroups)} top cgroups: "
+                            f"{top_cgroups[:3]}{'...' if len(top_cgroups) > 3 else ''}"
+                        )
+                    else:
+                        # Never fall back to system-wide profiling when cgroups are explicitly requested
+                        from gprofiler.exceptions import PerfNoSupportedEvent
+
+                        if max_docker_containers > 0:
+                            logger.error(
+                                f"No Docker containers found for profiling despite "
+                                f"--perf-max-docker-containers={max_docker_containers}. "
+                                "This could indicate cgroup v2 compatibility issues or no running containers. "
+                                "Perf profiler will be disabled to prevent system-wide profiling."
+                            )
+                            raise PerfNoSupportedEvent(
+                                "Docker container profiling requested but no containers available"
+                            )
+                        elif max_cgroups > 0:
+                            logger.error(
+                                f"No cgroups found for profiling despite --perf-max-cgroups={max_cgroups}. "
+                                "This could indicate cgroup compatibility issues or no active cgroups. "
+                                "Perf profiler will be disabled to prevent system-wide profiling."
+                            )
+                            raise PerfNoSupportedEvent("Cgroup profiling requested but no cgroups available")
+                        else:
+                            logger.error(
+                                "Cgroup profiling was requested (--perf-use-cgroups) but no specific limits were set. "
+                                "Perf profiler will be disabled to prevent system-wide profiling."
+                            )
+                            raise PerfNoSupportedEvent(
+                                "Cgroup profiling requested but no containers or cgroups specified"
+                            )
+                except Exception as e:
+                    # Never fall back to system-wide profiling when cgroups are explicitly requested
+                    from gprofiler.exceptions import PerfNoSupportedEvent
+
+                    logger.error(
+                        f"Failed to get cgroups for profiling: {e}. "
+                        "Perf profiler will be disabled to prevent system-wide profiling."
+                    )
+                    raise PerfNoSupportedEvent(f"Cgroup profiling failed: {e}")
+        elif processes_to_profile is not None:
+            # Traditional PID-based profiling
             self._pid_args.append("--pid")
             self._pid_args.append(",".join([str(process.pid) for process in processes_to_profile]))
         else:
+            # System-wide profiling
             self._pid_args.append("-a")
+
         self._extra_args = extra_args
         self._switch_timeout_s = switch_timeout_s
         self._process: Optional[Popen] = None
@@ -70,6 +138,44 @@ class PerfProcess:
         return f"perf ({self._type} mode)"
 
     def _get_perf_cmd(self) -> List[str]:
+        # When using cgroups, perf requires events to be specified before cgroups.
+        # If no explicit events are provided but cgroups are used, add default event.
+        # For multiple cgroups, perf requires one event per cgroup.
+        extra_args = self._extra_args
+        
+        # Separate extra_args into perf options and application command
+        # The "--" separator marks the boundary between perf args and the app command
+        perf_extra_args = []
+        app_command = []
+        separator_found = False
+        
+        for arg in extra_args:
+            if arg == "--":
+                separator_found = True
+                app_command.append(arg)
+            elif separator_found:
+                app_command.append(arg)
+            else:
+                perf_extra_args.append(arg)
+        
+        if self._cgroup_args and not perf_extra_args:
+            # Count the number of cgroups (they are comma-separated in -G argument)
+            cgroup_arg = None
+            for i, arg in enumerate(self._cgroup_args):
+                if arg == "-G" and i + 1 < len(self._cgroup_args):
+                    cgroup_arg = self._cgroup_args[i + 1]
+                    break
+
+            if cgroup_arg:
+                num_cgroups = len(cgroup_arg.split(","))
+                # Add one event per cgroup (perf requirement)
+                perf_extra_args = []
+                for _ in range(num_cgroups):
+                    perf_extra_args.extend(["-e", "cycles"])
+            else:
+                # Fallback: single event
+                perf_extra_args = ["-e", "cycles"]
+
         return (
             [
                 perf_path(),
@@ -88,9 +194,11 @@ class PerfProcess:
                 "-m",
                 str(self._MMAP_SIZES[self._type]),
             ]
+            + perf_extra_args  # Events must come before cgroups
             + self._pid_args
+            + self._cgroup_args
             + (["-k", "1"] if self._inject_jit else [])
-            + self._extra_args
+            + app_command  # Application command (with "--") must be last
         )
 
     def start(self) -> None:
