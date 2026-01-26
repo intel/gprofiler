@@ -25,6 +25,14 @@ def get_profilers(
     process_profilers_instances: List["ProcessProfilerBase"] = []
     system_profiler: Union["SystemProfiler", "NoopProfiler"] = NoopProfiler()
 
+    # When custom event is specified, only use perf (SystemProfiler), disable all language profilers
+    custom_event_mode = user_args.get("perf_event") is not None
+    if custom_event_mode:
+        logger.info(
+            "Custom perf event mode enabled - disabling all language-specific profilers",
+            event=user_args.get("perf_event"),
+        )
+
     if profiling_mode != "none":
         arch = get_arch()
         for profiler_name, profiler_config in get_profilers_registry().items():
@@ -50,6 +58,13 @@ def get_profilers(
             for key, value in user_args.items():
                 if key.startswith(lower_profiler_name) or key in COMMON_PROFILER_ARGUMENT_NAMES:
                     profiler_kwargs[key] = value
+
+            # Add custom event parameters for SystemProfiler
+            if profiler_name == "Perf" and custom_event_mode:
+                profiler_kwargs["custom_event_name"] = user_args.get("perf_event")
+                profiler_kwargs["custom_event_args"] = user_args.get("perf_event_args")
+                profiler_kwargs["perf_period"] = user_args.get("perf_event_period")
+
             try:
                 profiler_instance = profiler_config.profiler_class(**profiler_kwargs)
             except Exception:
@@ -63,6 +78,10 @@ def get_profilers(
                 if isinstance(profiler_instance, SystemProfiler):
                     system_profiler = profiler_instance
                 else:
+                    # In custom event mode, skip all process profilers
+                    if custom_event_mode:
+                        logger.debug(f"Skipping {profiler_name} profiler in custom event mode")
+                        continue
                     process_profilers_instances.append(profiler_instance)
 
     return system_profiler, process_profilers_instances

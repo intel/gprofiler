@@ -61,10 +61,14 @@ class SupportedPerfEvent(Enum):
     PERF_DEFAULT = "default"
     PERF_SW_CPU_CLOCK = "cpu-clock"
     PERF_SW_TASK_CLOCK = "task-clock"
+    PERF_CUSTOM_EVENT = "custom"  # User-specified event via --perf-event
 
-    def perf_extra_args(self) -> List[str]:
+    def perf_extra_args(self, custom_event_args: Optional[List[str]] = None) -> List[str]:
         if self == SupportedPerfEvent.PERF_DEFAULT:
             return []
+        elif self == SupportedPerfEvent.PERF_CUSTOM_EVENT:
+            # Custom event args provided externally
+            return custom_event_args if custom_event_args else []
         return ["-e", self.value]
 
 

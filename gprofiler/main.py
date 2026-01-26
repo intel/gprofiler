@@ -335,6 +335,41 @@ class GProfiler:
             else {"hostname": get_hostname()}
         )
         metadata.update({"profiling_mode": self._profiler_state.profiling_mode})
+
+        # Add sampling event information if custom event is being used
+        if hasattr(self.system_profiler, "_custom_event_name") and self.system_profiler._custom_event_name:
+            from gprofiler.platform import get_hypervisor_vendor
+            from gprofiler.utils.hw_events import get_event_type, get_perf_available_events, get_precise_modifier
+
+            event_name = self.system_profiler._custom_event_name
+            hypervisor_vendor = get_hypervisor_vendor()
+            perf_events = get_perf_available_events()
+            event_type = get_event_type(event_name, perf_events)
+            modifier = get_precise_modifier(
+                event_name, event_type if event_type else "custom", hypervisor_vendor
+            )
+
+            metadata.update(
+                {
+                    "sampling_event": event_name,
+                    "sampling_mode": "period" if self._args.perf_event_period else "frequency",
+                    "precise_modifier": modifier,
+                }
+            )
+
+            if self._args.perf_event_period:
+                metadata.update({"sampling_period": self._args.perf_event_period})
+            else:
+                metadata.update({"sampling_frequency": self._args.frequency})
+        else:
+            # Default CPU time-based profiling
+            metadata.update(
+                {
+                    "sampling_event": "cpu-time",
+                    "sampling_mode": "frequency",
+                    "sampling_frequency": self._args.frequency,
+                }
+            )
         metrics = self._system_metrics_monitor.get_metrics()
         hwmetrics = self._hw_metrics_monitor.get_hw_metrics()
         if hwmetrics is None:
@@ -605,6 +640,25 @@ def parse_cmd_args() -> configargparse.Namespace:
     )
 
     _add_profilers_arguments(parser)
+
+    # Custom perf event arguments
+    perf_event_options = parser.add_argument_group("Perf Event")
+    perf_event_options.add_argument(
+        "--perf-event",
+        type=str,
+        dest="perf_event",
+        help="Specify a perf event for flamegraph generation (e.g., cache-misses, page-faults, sched:sched_switch). "
+        "When specified, only perf profiler will be active and all language-specific profilers will be disabled. "
+        "Event can be from 'perf list' or a custom event defined in hw_events.json.",
+    )
+    perf_event_options.add_argument(
+        "--perf-event-period",
+        type=int,
+        dest="perf_event_period",
+        help="Use period-based sampling instead of frequency (-c instead of -F). "
+        "Specify the number of events between samples (e.g., 10000 for sampling every 10000 events). "
+        "Only valid with --perf-event.",
+    )
 
     spark_options = parser.add_argument_group("Spark")
 
@@ -935,6 +989,40 @@ def parse_cmd_args() -> configargparse.Namespace:
 
     if args.profile_spawned_processes and args.pids_to_profile is not None:
         parser.error("--pids is not allowed when profiling spawned processes")
+
+    # Validate and resolve perf event arguments
+    if args.perf_event:
+        from gprofiler.platform import get_hypervisor_vendor
+        from gprofiler.utils.hw_events import validate_and_get_event_args, validate_event_with_fallback
+
+        # Validate --perf-event-period only with --perf-event
+        if args.perf_event_period and not args.perf_event:
+            parser.error("--perf-event-period requires --perf-event to be specified")
+
+        try:
+            # Detect hypervisor
+            hypervisor_vendor = get_hypervisor_vendor()
+            logger.info(f"Detected hypervisor: {hypervisor_vendor}")
+
+            # Validate and resolve event
+            event_args = validate_and_get_event_args(args.perf_event, hypervisor_vendor)
+
+            # Test accessibility with fallback
+            validated_args = validate_event_with_fallback(args.perf_event, event_args, hypervisor_vendor)
+
+            # Store resolved event args in args
+            args.perf_event_args = validated_args
+
+            logger.info(
+                f"Validated perf event",
+                event=args.perf_event,
+                hypervisor=hypervisor_vendor,
+                args=validated_args,
+                period=args.perf_event_period,
+            )
+
+        except (ValueError, RuntimeError) as e:
+            parser.error(f"Perf event validation failed: {e}")
 
     return args
 

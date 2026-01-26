@@ -48,6 +48,9 @@ class PerfProcess:
         extra_args: List[str],
         processes_to_profile: Optional[List[Process]],
         switch_timeout_s: int,
+        custom_event_name: Optional[str] = None,
+        use_period: bool = False,
+        period_value: Optional[int] = None,
     ):
         self._start_time = 0.0
         self._frequency = frequency
@@ -64,18 +67,28 @@ class PerfProcess:
         self._extra_args = extra_args
         self._switch_timeout_s = switch_timeout_s
         self._process: Optional[Popen] = None
+        self._custom_event_name = custom_event_name
+        self._use_period = use_period
+        self._period_value = period_value
 
     @property
     def _log_name(self) -> str:
         return f"perf ({self._type} mode)"
 
     def _get_perf_cmd(self) -> List[str]:
+        # Use period-based sampling if specified, otherwise frequency-based
+        if self._use_period and self._period_value is not None:
+            sampling_args = ["-c", str(self._period_value)]
+        else:
+            sampling_args = ["-F", str(self._frequency)]
+
         return (
             [
                 perf_path(),
                 "record",
-                "-F",
-                str(self._frequency),
+            ]
+            + sampling_args
+            + [
                 "-g",
                 "-o",
                 self._output_path,

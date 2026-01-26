@@ -193,8 +193,10 @@ class SystemInfo:
     kernel_release: str
     kernel_version: str
     system_name: str
+    hypervisor: str
     processors: int
     cpu_model_name: str
+    cpu_arch_codename: str
     cpu_flags: str
     memory_capacity_mb: int
     hostname: str
@@ -254,6 +256,13 @@ def get_static_system_info() -> SystemInfo:
     run_mode = get_run_mode()
     deployment_type = get_deployment_type(run_mode)
     cpu_model_name, cpu_flags = get_cpu_info()
+
+    # Import here to avoid circular dependency
+    from gprofiler.platform import get_cpu_model, get_hypervisor_vendor
+
+    hypervisor = get_hypervisor_vendor()
+    cpu_arch_codename = get_cpu_model()
+
     return SystemInfo(
         python_version=sys.version,
         run_mode=run_mode,
@@ -261,8 +270,10 @@ def get_static_system_info() -> SystemInfo:
         kernel_release=uname.release,
         kernel_version=uname.version,
         system_name=uname.system,
+        hypervisor=hypervisor,
         processors=cpu_count,
         cpu_model_name=cpu_model_name,
+        cpu_arch_codename=cpu_arch_codename,
         cpu_flags=cpu_flags,
         memory_capacity_mb=round(psutil.virtual_memory().total / 1024 / 1024),
         hostname=hostname,
