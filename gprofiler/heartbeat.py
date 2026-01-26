@@ -98,7 +98,7 @@ class HeartbeatClient:
                     logger.info(f"Received profiling command from server: {result.get('command_id')}")
                     return result
                 else:
-                    logger.debug("Heartbeat successful, no pending commands")
+                    logger.debug("Heartbeat sent. No pending commands, waiting for instructions...")
                     return None
             else:
                 logger.error(f"Heartbeat failed with status {response.status_code}: {response.text}")
@@ -214,7 +214,7 @@ class DynamicGProfilerManager:
 
                     # Check for idempotency - skip if command already executed
                     if command_id in self.heartbeat_client.executed_command_ids:
-                        logger.info(f"Command ID {command_id} already executed, skipping...")
+                        logger.debug(f"Command ID {command_id} already executed, skipping...")
 
                         # Wait for next heartbeat
                         self.stop_event.wait(self.heartbeat_interval)
@@ -257,6 +257,9 @@ class DynamicGProfilerManager:
                                 error_message=None,
                                 results_path=None,
                             )
+                            
+                            # Log a clear message after stop is completed
+                            logger.info("Profiling stopped. Running in heartbeat mode, waiting for commands...")
                         elif command_type == "start":
                             # Stop current profiler if running, then start new one
                             logger.info(f"Executing START command for command ID: {command_id}")
