@@ -61,10 +61,14 @@ class SupportedPerfEvent(Enum):
     PERF_DEFAULT = "default"
     PERF_SW_CPU_CLOCK = "cpu-clock"
     PERF_SW_TASK_CLOCK = "task-clock"
+    PERF_CUSTOM_EVENT = "custom"  # User-specified event via --perf-event
 
-    def perf_extra_args(self) -> List[str]:
+    def perf_extra_args(self, custom_event_args: Optional[List[str]] = None) -> List[str]:
         if self == SupportedPerfEvent.PERF_DEFAULT:
             return []
+        elif self == SupportedPerfEvent.PERF_CUSTOM_EVENT:
+            # Custom event args provided externally
+            return custom_event_args if custom_event_args else []
         return ["-e", self.value]
 
 
@@ -183,6 +187,7 @@ def parse_perf_script_from_iterator(
     pid_to_collapsed_stacks_counters: ProcessToStackSampleCounters = defaultdict(Counter)
 
     current_sample_lines: List[str] = []
+    sample_count = 0
 
     for line in perf_iterator:
         # Empty line indicates end of sample block
@@ -191,6 +196,7 @@ def parse_perf_script_from_iterator(
                 # Process the accumulated sample
                 sample = "\n".join(current_sample_lines)
                 _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
+                sample_count += 1
                 current_sample_lines = []
         else:
             # Accumulate lines for current sample
@@ -200,6 +206,9 @@ def parse_perf_script_from_iterator(
     if current_sample_lines:
         sample = "\n".join(current_sample_lines)
         _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
+        sample_count += 1
+
+    logger.info(f"Parsed perf script output: {sample_count} samples")
 
     return pid_to_collapsed_stacks_counters
 

@@ -1,0 +1,24 @@
+{
+  "_comment": "Custom PMU events not available in 'perf list'. Each event has platform-specific programming information.",
+  "_supported_platforms": ["ICX", "SPR", "EMR", "GNR"],
+
+  "example_offcore_event": {
+    "description": "Example off-core event - replace with actual events",
+    "ICX": {
+      "raw": "r01b7",
+      "description": "Off-core requests - ICX specific"
+    },
+    "SPR": {
+      "raw": "r02b7",
+      "description": "Off-core requests - SPR specific"
+    },
+    "EMR": {
+      "raw": "r02b7",
+      "description": "Off-core requests - EMR specific (same as SPR)"
+    },
+    "GNR": {
+      "raw": "r03b7",
+      "description": "Off-core requests - GNR specific"
+    }
+  }
+}
