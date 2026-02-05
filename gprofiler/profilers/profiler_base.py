@@ -16,6 +16,7 @@
 
 import concurrent.futures
 import contextlib
+import logging
 import os
 import sched
 import time
@@ -180,6 +181,65 @@ class ProcessProfilerBase(ProfilerBase):
     def _notify_selected_processes(self, processes: List[Process]) -> None:
         pass
 
+    def _should_limit_processes(self) -> bool:
+        """
+        Override this in profilers that should NOT respect the max_processes_per_profiler limit.
+        System-wide profilers (perf, eBPF) should return False.
+        Runtime profilers (py-spy, Java, Ruby, etc.) should return True (default).
+        """
+        return True
+
+    def _is_system_wide_profiler(self) -> bool:
+        """
+        Override this in system-wide profilers (perf, eBPF) to return True.
+        These profilers can be disabled when system has too many processes.
+        """
+        return False
+
+    def _get_top_processes_by_cpu(self, processes: List[Process], max_processes: int) -> List[Process]:
+        """
+        Filter processes to the top N by CPU usage to reduce memory consumption.
+
+        Args:
+            processes: List of processes to filter
+            max_processes: Maximum number of processes to return
+
+        Returns:
+            List of top N processes by CPU usage, or all processes if max_processes <= 0
+        """
+        if max_processes <= 0 or len(processes) <= max_processes:
+            return processes
+
+        logger.info(
+            f"{self.__class__.__name__}: Limiting to top {max_processes} processes "
+            f"(from {len(processes)}) by CPU usage to reduce memory consumption"
+        )
+
+        # Get CPU usage for each process, handling exceptions gracefully
+        processes_with_cpu = []
+        for process in processes:
+            try:
+                # Use short interval for CPU measurement to avoid blocking
+                cpu_percent = process.cpu_percent(interval=0.1)
+                processes_with_cpu.append((process, cpu_percent))
+            except (NoSuchProcess, ZombieProcess, PermissionError):
+                # Process may have died or we don't have permission
+                # Still include it with 0% CPU so it's considered but deprioritized
+                processes_with_cpu.append((process, 0.0))
+            except Exception as e:
+                logger.debug(f"Error getting CPU usage for process {process.pid}: {e}")
+                processes_with_cpu.append((process, 0.0))
+
+        # Sort by CPU usage (descending) and take top N
+        processes_with_cpu.sort(key=lambda x: x[1], reverse=True)
+        top_processes = [proc for proc, cpu in processes_with_cpu[:max_processes]]
+
+        if logger.isEnabledFor(logging.DEBUG):
+            top_cpu_info = [(proc.pid, cpu) for proc, cpu in processes_with_cpu[: min(5, max_processes)]]
+            logger.debug(f"{self.__class__.__name__}: Selected top processes by CPU: {top_cpu_info}")
+
+        return top_processes
+
     def _get_process_age(self, process: Process) -> float:
         """Get the age of a process in seconds."""
         try:
@@ -206,6 +266,13 @@ class ProcessProfilerBase(ProfilerBase):
                 process for process in processes_to_profile if process in self._profiler_state.processes_to_profile
             ]
             logger.debug(f"{self.__class__.__name__}: processes left after filtering: {len(processes_to_profile)}")
+
+        # Apply max_processes_per_profiler limit for runtime profilers (not system-wide profilers)
+        if self._should_limit_processes() and self._profiler_state.max_processes_per_profiler > 0:
+            processes_to_profile = self._get_top_processes_by_cpu(
+                processes_to_profile, self._profiler_state.max_processes_per_profiler
+            )
+
         self._notify_selected_processes(processes_to_profile)
 
         if not processes_to_profile:
