@@ -13,3 +13,4 @@ WMI==1.5.1; sys.platform == "win32"
 ./granulate-utils/
 humanfriendly==10.0
 beautifulsoup4==4.13.3
+backports.tarfile==1.2.0

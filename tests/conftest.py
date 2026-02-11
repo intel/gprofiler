@@ -408,7 +408,14 @@ def application_docker_image(
                 )
             if application_image_tag == "musl":
                 pytest.xfail("This test does not work on aarch64 https://github.com/intel/gprofiler/issues/743")
-    yield build_image(docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)])
+    image = build_image(docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)])
+    yield image
+
+    # Clean up the test image after test completes to free disk space for subsequent tests
+    try:
+        docker_client.images.remove(image.id, force=True)
+    except Exception:
+        pass  # Image might be in use by other tests or already removed
 
 
 @fixture
