@@ -57,7 +57,10 @@ class HeartbeatClient:
         # Set up authentication headers
         if self.server_token:
             self.session.headers.update(
-                {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
+                {
+                    "Authorization": f"Bearer {self.server_token}",
+                    "Content-Type": "application/json",
+                }
             )
 
     def _get_local_ip(self) -> str:
@@ -257,7 +260,7 @@ class DynamicGProfilerManager:
                                 error_message=None,
                                 results_path=None,
                             )
-                            
+
                             # Log a clear message after stop is completed
                             logger.info("Profiling stopped. Running in heartbeat mode, waiting for commands...")
                         elif command_type == "start":
@@ -276,7 +279,10 @@ class DynamicGProfilerManager:
                                 results_path=None,
                             )
                     except Exception as e:
-                        logger.error(f"Failed to execute {command_type} command {command_id}: {e}", exc_info=True)
+                        logger.error(
+                            f"Failed to execute {command_type} command {command_id}: {e}",
+                            exc_info=True,
+                        )
                         # Report failure to the server
                         self.heartbeat_client.send_command_completion(
                             command_id=command_id,
@@ -353,7 +359,11 @@ class DynamicGProfilerManager:
             logger.error(f"Failed to start new profiler: {e}", exc_info=True)
             # Report failure to the server
             self.heartbeat_client.send_command_completion(
-                command_id=command_id, status="failed", execution_time=0, error_message=str(e), results_path=None
+                command_id=command_id,
+                status="failed",
+                execution_time=0,
+                error_message=str(e),
+                results_path=None,
             )
 
     def _create_profiler_args(self, profiling_command: Dict[str, Any]) -> configargparse.Namespace:
@@ -589,7 +599,10 @@ class DynamicGProfilerManager:
             # Only consider a failure if it was not due to a stop event
             if not gprofiler._profiler_state.stop_event.is_set():
                 _ = str(e)  # Available for future error reporting
-                logger.error(f"Profiler run failed for command ID {command_id}: {e}", exc_info=True)
+                logger.error(
+                    f"Profiler run failed for command ID {command_id}: {e}",
+                    exc_info=True,
+                )
             else:
                 logger.info(f"Profiler run was stopped before completion for command ID: {command_id}")
 

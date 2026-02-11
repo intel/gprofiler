@@ -142,13 +142,13 @@ class PerfProcess:
         # If no explicit events are provided but cgroups are used, add default event.
         # For multiple cgroups, perf requires one event per cgroup.
         extra_args = self._extra_args
-        
+
         # Separate extra_args into perf options and application command
         # The "--" separator marks the boundary between perf args and the app command
         perf_extra_args = []
         app_command = []
         separator_found = False
-        
+
         for arg in extra_args:
             if arg == "--":
                 separator_found = True
@@ -157,7 +157,7 @@ class PerfProcess:
                 app_command.append(arg)
             else:
                 perf_extra_args.append(arg)
-        
+
         if self._cgroup_args and not perf_extra_args:
             # Count the number of cgroups (they are comma-separated in -G argument)
             cgroup_arg = None
@@ -207,14 +207,20 @@ class PerfProcess:
         remove_path(self._output_path, missing_ok=True)
         process = start_process(self._get_perf_cmd())
         try:
-            wait_event(self._DUMP_TIMEOUT_S, self._stop_event, lambda: os.path.exists(self._output_path))
+            wait_event(
+                self._DUMP_TIMEOUT_S,
+                self._stop_event,
+                lambda: os.path.exists(self._output_path),
+            )
             self.start_time = time.monotonic()
         except TimeoutError:
             process.kill()
             cleanup_process_reference(process=process)
             assert process.stdout is not None and process.stderr is not None
             logger.critical(
-                f"{self._log_name} failed to start", stdout=process.stdout.read(), stderr=process.stderr.read()
+                f"{self._log_name} failed to start",
+                stdout=process.stdout.read(),
+                stderr=process.stderr.read(),
             )
             raise
         else:
@@ -229,7 +235,12 @@ class PerfProcess:
             exit_code, stdout, stderr = reap_process(self._process)
             cleanup_process_reference(process=self._process)
             self._process = None
-            logger.info(f"Stopped {self._log_name}", exit_code=exit_code, stderr=stderr, stdout=stdout)
+            logger.info(
+                f"Stopped {self._log_name}",
+                exit_code=exit_code,
+                stderr=stderr,
+                stdout=stdout,
+            )
 
     def is_running(self) -> bool:
         """
@@ -311,16 +322,36 @@ class PerfProcess:
             inject_data = Path(f"{str(perf_data)}.inject")
             if self._inject_jit:
                 run_process(
-                    [perf_path(), "inject", "--jit", "-o", str(inject_data), "-i", str(perf_data)],
+                    [
+                        perf_path(),
+                        "inject",
+                        "--jit",
+                        "-o",
+                        str(inject_data),
+                        "-i",
+                        str(perf_data),
+                    ],
                 )
                 perf_data.unlink()
                 perf_data = inject_data
 
-            perf_script_cmd = [perf_path(), "script", "-F", "+pid", "-i", str(perf_data)]
+            perf_script_cmd = [
+                perf_path(),
+                "script",
+                "-F",
+                "+pid",
+                "-i",
+                str(perf_data),
+            ]
 
             # Use Popen directly for streaming instead of run_process
             perf_script_proc = Popen(
-                perf_script_cmd, stdout=PIPE, stderr=PIPE, text=True, encoding="utf8", errors="replace"
+                perf_script_cmd,
+                stdout=PIPE,
+                stderr=PIPE,
+                text=True,
+                encoding="utf8",
+                errors="replace",
             )
 
             # Stream output line by line
