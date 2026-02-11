@@ -168,8 +168,10 @@ class GProfiler:
             profiling_mode=profiling_mode,
             container_names_client=container_names_client,
             processes_to_profile=processes_to_profile,
-            max_processes_per_profiler=user_args.get("max_processes_per_profiler", 0),
-            max_system_processes_for_system_profilers=user_args.get("max_system_processes_for_system_profilers", 0),
+            max_processes_per_profiler=int(user_args.get("max_processes_per_profiler", 0) or 0),
+            max_system_processes_for_system_profilers=int(
+                user_args.get("max_system_processes_for_system_profilers", 0) or 0
+            ),
         )
         self.system_profiler, self.process_profilers = get_profilers(user_args, profiler_state=self._profiler_state)
         self._usage_logger = usage_logger
