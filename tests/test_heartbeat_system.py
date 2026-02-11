@@ -182,7 +182,6 @@ def create_mock_responses() -> tuple[Any, Dict[str, Any]]:
 
     def mock_heartbeat_post(url: str, json: Optional[Any] = None, timeout: Optional[Any] = None) -> Any:  # noqa: F811
         """Mock heartbeat endpoint"""
-        json_data = json if json is not None else {}
         mock_state["heartbeat_count"] += 1
 
         # Mock response object

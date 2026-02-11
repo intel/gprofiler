@@ -394,7 +394,7 @@ class PerfMetadata(ApplicationMetadata):
 
 class GolangPerfMetadata(PerfMetadata):
     def relevant_for_process(self, process: Process) -> bool:
-        return is_golang_process(process)
+        return bool(is_golang_process(process))
 
     def make_application_metadata(self, process: Process) -> Dict[str, Any]:
         metadata = {
@@ -408,7 +408,7 @@ class GolangPerfMetadata(PerfMetadata):
 
 class NodePerfMetadata(PerfMetadata):
     def relevant_for_process(self, process: Process) -> bool:
-        return is_node_process(process)
+        return bool(is_node_process(process))
 
     def make_application_metadata(self, process: Process) -> Dict[str, Any]:
         metadata = {"node_version": self.get_exe_version_cached(process)}

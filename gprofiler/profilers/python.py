@@ -146,7 +146,9 @@ class PythonMetadata(ApplicationMetadata):
                     pdeathsigger=False,
                 )
 
-            return run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid).stdout.decode().strip()
+            result = cast(CompletedProcess, run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid))
+            version_output: str = result.stdout.decode().strip()
+            return version_output
         except Exception:
             return None
 

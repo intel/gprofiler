@@ -243,7 +243,7 @@ class ProcessProfilerBase(ProfilerBase):
     def _get_process_age(self, process: Process) -> float:
         """Get the age of a process in seconds."""
         try:
-            return time.time() - process.create_time()
+            return float(time.time() - process.create_time())
         except (NoSuchProcess, ZombieProcess):
             return 0.0
 
