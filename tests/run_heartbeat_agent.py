@@ -11,13 +11,14 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 
-def run_gprofiler_heartbeat_mode():
+def run_gprofiler_heartbeat_mode() -> int:
     """Run gProfiler in heartbeat mode"""
 
     # Configuration - adjust these values for your environment
-    config = {
+    config: Dict[str, Any] = {
         "server_token": "test-token",
         "service_name": "test-service",
         "api_server": "http://localhost:8000",  # Performance Studio backend URL
@@ -29,30 +30,32 @@ def run_gprofiler_heartbeat_mode():
     }
 
     # Ensure output directory exists
-    os.makedirs(config["output_dir"], exist_ok=True)
+    output_dir = config["output_dir"]
+    assert isinstance(output_dir, str)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Build the command
     gprofiler_path = Path(__file__).parent.parent / "gprofiler" / "main.py"
 
-    cmd = [
+    cmd: list[str] = [
         sys.executable,
         str(gprofiler_path),
         "--enable-heartbeat-server",
         "--upload-results",
         "--token",
-        config["server_token"],
+        str(config["server_token"]),
         "--service-name",
-        config["service_name"],
+        str(config["service_name"]),
         "--api-server",
-        config["api_server"],
+        str(config["api_server"]),
         "--server-host",
-        config["server_host"],
+        str(config["server_host"]),
         "--output-dir",
-        config["output_dir"],
+        str(config["output_dir"]),
         "--log-file",
-        config["log_file"],
+        str(config["log_file"]),
         "--heartbeat-interval",
-        config["heartbeat_interval"],
+        str(config["heartbeat_interval"]),
         "--no-verify",  # For testing with localhost
     ]
 
@@ -78,15 +81,17 @@ def run_gprofiler_heartbeat_mode():
 
     try:
         # Start the process
-        process = subprocess.Popen(
+        process: Optional[subprocess.Popen[str]] = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, bufsize=1
         )
 
         # Monitor output
-        for line in iter(process.stdout.readline, ""):
-            print(f"[AGENT] {line.rstrip()}")
+        if process and process.stdout is not None:
+            for line in iter(process.stdout.readline, ""):
+                print(f"[AGENT] {line.rstrip()}")
 
-        process.wait()
+        if process:
+            process.wait()
 
     except KeyboardInterrupt:
         print("\n🛑 Received interrupt signal, stopping agent...")
@@ -107,7 +112,7 @@ def run_gprofiler_heartbeat_mode():
     return 0
 
 
-def print_usage():
+def print_usage() -> None:
     """Print usage instructions"""
     print("📖 gProfiler Heartbeat Mode Test Runner")
     print("=" * 50)
@@ -129,7 +134,7 @@ def print_usage():
     print("4. Watch the agent respond to commands")
 
 
-def main():
+def main() -> int:
     """Main function"""
     if len(sys.argv) > 1 and sys.argv[1] in ["-h", "--help"]:
         print_usage()

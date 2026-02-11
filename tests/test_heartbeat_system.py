@@ -38,7 +38,7 @@ class HeartbeatClient:
         self.hostname = hostname
         self.ip_address = ip_address
         self.last_command_id: Optional[str] = None
-        self.executed_commands = set()
+        self.executed_commands: set[str] = set()
 
     def send_heartbeat(self) -> Optional[Dict[str, Any]]:
         """Send heartbeat to backend and return response"""
@@ -91,7 +91,12 @@ class HeartbeatClient:
             return None
 
     def send_command_completion(
-        self, command_id: str, status: str, execution_time: int = 0, error_message: str = None, results_path: str = None
+        self,
+        command_id: str,
+        status: str,
+        execution_time: int = 0,
+        error_message: Optional[str] = None,
+        results_path: Optional[str] = None,
     ) -> bool:
         """Send command completion status to backend"""
         completion_data = {
@@ -119,7 +124,7 @@ class HeartbeatClient:
             print(f"❌ Error sending command completion: {e}")
             return False
 
-    def simulate_profiling_action(self, command_type: str, command_id: str):
+    def simulate_profiling_action(self, command_type: str, command_id: str) -> None:
         """Simulate profiling action (start/stop)"""
         if command_type == "start":
             print(f"🚀 Starting profiler for command {command_id}")
@@ -171,12 +176,13 @@ def create_test_profiling_request(backend_url: str, service_name: str, command_t
         return False
 
 
-def create_mock_responses():
+def create_mock_responses() -> tuple[Any, Dict[str, Any]]:
     """Create mock responses for testing without a real backend"""
-    mock_state = {"pending_commands": [], "completed_commands": [], "heartbeat_count": 0}
+    mock_state: Dict[str, Any] = {"pending_commands": [], "completed_commands": [], "heartbeat_count": 0}
 
-    def mock_heartbeat_post(url, json=None, timeout=None):  # noqa: F811
+    def mock_heartbeat_post(url: str, json: Optional[Any] = None, timeout: Optional[Any] = None) -> Any:  # noqa: F811
         """Mock heartbeat endpoint"""
+        json_data = json if json is not None else {}
         mock_state["heartbeat_count"] += 1
 
         # Mock response object
@@ -196,8 +202,11 @@ def create_mock_responses():
 
         return response
 
-    def mock_profile_request_post(url, json=None, timeout=None):  # noqa: F811
+    def mock_profile_request_post(
+        url: str, json: Optional[Any] = None, timeout: Optional[Any] = None
+    ) -> Any:  # noqa: F811
         """Mock profile request endpoint"""
+        json_data = json if json is not None else {}
         # Generate unique IDs based on total requests made
         total_requests = len(mock_state["completed_commands"]) + len(mock_state["pending_commands"]) + 1
         command_id = f"cmd_{total_requests}"
@@ -208,11 +217,11 @@ def create_mock_responses():
             {
                 "command_id": command_id,
                 "profiling_command": {
-                    "command_type": json.get("command_type", "start"),
+                    "command_type": json_data.get("command_type", "start"),
                     "combined_config": {
-                        "duration": json.get("duration", 60),
-                        "frequency": json.get("frequency", 11),
-                        "profiling_mode": json.get("profiling_mode", "cpu"),
+                        "duration": json_data.get("duration", 60),
+                        "frequency": json_data.get("frequency", 11),
+                        "profiling_mode": json_data.get("profiling_mode", "cpu"),
                     },
                 },
             }
@@ -228,13 +237,16 @@ def create_mock_responses():
 
         return response
 
-    def mock_command_completion_post(url, json=None, timeout=None):  # noqa: F811
+    def mock_command_completion_post(
+        url: str, json: Optional[Any] = None, timeout: Optional[Any] = None
+    ) -> Any:  # noqa: F811
         """Mock command completion endpoint"""
+        json_data = json if json is not None else {}
         mock_state["completed_commands"].append(
             {
-                "command_id": json.get("command_id"),
-                "status": json.get("status"),
-                "execution_time": json.get("execution_time"),
+                "command_id": json_data.get("command_id"),
+                "status": json_data.get("status"),
+                "execution_time": json_data.get("execution_time"),
             }
         )
 
@@ -244,7 +256,7 @@ def create_mock_responses():
 
         return response
 
-    def mock_post(url, json=None, timeout=None):  # noqa: F811
+    def mock_post(url: str, json: Optional[Any] = None, timeout: Optional[Any] = None) -> Any:  # noqa: F811
         """Route mock requests to appropriate handlers"""
         if "/heartbeat" in url:
             return mock_heartbeat_post(url, json, timeout)
@@ -262,7 +274,7 @@ def create_mock_responses():
     return mock_post, mock_state
 
 
-def run_tests():
+def run_tests() -> None:
     """Run the actual test logic"""
 
     # Initialize test client
@@ -316,7 +328,7 @@ def run_tests():
     print(f"   - Commands executed: {list(client.executed_commands)}")
 
 
-def main():
+def main() -> None:
     """Main test function"""
     print("🧪 Testing Heartbeat-Based Profiling Control System")
 
