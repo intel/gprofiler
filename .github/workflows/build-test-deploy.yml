@@ -15,6 +15,9 @@ on:
   push:
     tags:
       - '**'
+  schedule:
+    # Run weekly on Sunday at 00:00 UTC to keep cache warm
+    - cron: '0 0 * * 0'
 
 jobs:
   build-executable-x64:
@@ -26,14 +29,13 @@ jobs:
          fetch-depth: 0
          submodules: true
 
-     # TODO: Add docker layer caching when GitHub Actions cache is stabilized and works good with "satackey/action-docker-layer-caching@v0.0.11"
+     - name: Set up Docker Buildx
+       uses: docker/setup-buildx-action@v3
+
      - name: Build gProfiler executable
-       # Using BuildKit although it has another cache mechanism which is not supported by satackey/action-docker-layer-caching@v0.0.11
-       # We tried to cache using buildx cache (cache-from, cache-to flags) and got strange behavior when caching,
-       # decided not to use buildkit here to get nice caches.
        run: |
         mkdir -p output
-        ./scripts/build_x86_64_executable.sh
+        ./scripts/build_x86_64_executable.sh --cache-from type=gha --cache-to type=gha,mode=max
         mv build/x86_64/gprofiler output/gprofiler_x86_64
         cp output/gprofiler_x86_64 output/gprofiler  # for backwards compatibility, we upload both with arch suffix and without
 
@@ -122,12 +124,12 @@ jobs:
        run: scripts/setup_runner_requirements.sh
 
      - name: Set up Docker Buildx
-       uses: docker/setup-buildx-action@v2
+       uses: docker/setup-buildx-action@v3
 
      - name: Build gProfiler executable
        run: |
          mkdir -p output
-         ./scripts/build_aarch64_executable.sh
+         ./scripts/build_aarch64_executable.sh --cache-from type=gha --cache-to type=gha,mode=max
          mv build/aarch64/gprofiler output/gprofiler_aarch64
 
      - name: Upload the executables as job artifacts
@@ -189,6 +191,9 @@ jobs:
         submodules: true
         fetch-depth: 0
 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
     - name: Download executables from the previous job
       uses: actions/download-artifact@v4
       with:
@@ -200,7 +205,7 @@ jobs:
     - name: Build gProfiler image
       # see https://github.com/docker/buildx/issues/1507 about the --provenance flag, I decided to go safe without the extra manifest.
       # --skip-exe-build needs to be first!
-      run: ./scripts/build_x86_64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_x86_64 -t gprofiler_x86_64
+      run: ./scripts/build_x86_64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_x86_64 -t gprofiler_x86_64 --cache-from type=gha --cache-to type=gha,mode=max
 
     - name: Export gProfiler image
       run: mkdir -p output && docker image save gprofiler_x86_64 > output/gprofiler_x86_64.img
@@ -312,7 +317,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
 
       - name: Download executables from the previous job
         uses: actions/download-artifact@v4
@@ -320,7 +325,6 @@ jobs:
           name: gprofiler_aarch64
           path: output/
 
-      # TODO: Add docker layer caching when GitHub Actions cache is stabilized and works good with "satackey/action-docker-layer-caching@v0.0.11"
       - name: Build and push
         run: |
           set -x
@@ -330,7 +334,7 @@ jobs:
 
           # build & push Aarch64
           # --skip-exe-build needs to be first!
-          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push
+          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push --cache-from type=gha --cache-to type=gha,mode=max
 
   deploy-container:
     if: startsWith(github.ref, 'refs/tags/')
@@ -365,7 +369,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
 
       - name: Push manifest
         run: |
