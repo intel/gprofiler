@@ -35,7 +35,22 @@ jobs:
      - name: Build gProfiler executable
        run: |
         mkdir -p output
-        ./scripts/build_x86_64_executable.sh --cache-from type=gha --cache-to type=gha,mode=max
+        REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        ./scripts/build_x86_64_executable.sh \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-pyspy:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-rbspy:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-dotnet:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-perf:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-phpspy:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-musl:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-burn:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-node-musl:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-bcc:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-node-glibc:latest \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
         mv build/x86_64/gprofiler output/gprofiler_x86_64
         cp output/gprofiler_x86_64 output/gprofiler  # for backwards compatibility, we upload both with arch suffix and without
 
@@ -129,7 +144,22 @@ jobs:
      - name: Build gProfiler executable
        run: |
          mkdir -p output
-         ./scripts/build_aarch64_executable.sh --cache-from type=gha --cache-to type=gha,mode=max
+         REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+         ./scripts/build_aarch64_executable.sh \
+           --cache-from type=gha \
+           --cache-to type=gha,mode=max \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-pyspy:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-rbspy:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-dotnet:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-perf:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-phpspy:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-musl:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-burn:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-node-musl:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-bcc:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-node-glibc:latest \
+           --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
          mv build/aarch64/gprofiler output/gprofiler_aarch64
 
      - name: Upload the executables as job artifacts
@@ -205,7 +235,12 @@ jobs:
     - name: Build gProfiler image
       # see https://github.com/docker/buildx/issues/1507 about the --provenance flag, I decided to go safe without the extra manifest.
       # --skip-exe-build needs to be first!
-      run: ./scripts/build_x86_64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_x86_64 -t gprofiler_x86_64 --cache-from type=gha --cache-to type=gha,mode=max
+      run: |
+        REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        ./scripts/build_x86_64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_x86_64 -t gprofiler_x86_64 \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
 
     - name: Export gProfiler image
       run: mkdir -p output && docker image save gprofiler_x86_64 > output/gprofiler_x86_64.img
@@ -331,10 +366,14 @@ jobs:
 
           BASE_IMAGE="${{ env.GH_REPO }}:${{ env.RELEASE_VERSION }}"
           AARCH64_IMAGE="$BASE_IMAGE-aarch64"
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
 
           # build & push Aarch64
           # --skip-exe-build needs to be first!
-          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push --cache-from type=gha --cache-to type=gha,mode=max
+          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
 
   deploy-container:
     if: startsWith(github.ref, 'refs/tags/')
