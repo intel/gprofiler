@@ -63,7 +63,7 @@ def get_profilers(
                     profiler_kwargs[key] = value
 
             # Add custom event parameters for SystemProfiler
-            if profiler_name == "Perf" and custom_event_mode:
+            if profiler_name == SystemProfiler.name and custom_event_mode:
                 profiler_kwargs["custom_event_name"] = user_args.get("perf_event")
                 profiler_kwargs["custom_event_args"] = user_args.get("perf_event_args")
                 profiler_kwargs["perf_period"] = user_args.get("perf_event_period")
