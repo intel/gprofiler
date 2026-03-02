@@ -61,7 +61,7 @@ def get_cpu_model() -> str:
                     break
 
             # All supported platforms are Intel Family 6
-            if cpu_family != 6:
+            if cpu_family != 6 or model is None:
                 return "UNKNOWN"
 
             # Map model numbers to platform codes
@@ -118,8 +118,9 @@ def _read_hypervisor_vendor() -> str:
     The vendor string is 12 characters: EBX (4 bytes) + ECX (4 bytes) + EDX (4 bytes).
     """
     try:
-        import cpuid
         import struct
+
+        import cpuid
 
         # Execute CPUID leaf 0x40000000 for hypervisor vendor
         eax, ebx, ecx, edx = cpuid.cpuid(0x40000000, 0)

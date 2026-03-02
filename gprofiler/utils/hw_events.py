@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 from gprofiler.exceptions import CalledProcessError
 from gprofiler.log import get_logger_adapter
 from gprofiler.platform import get_cpu_model
-from gprofiler.utils import resource_path, run_process
+from gprofiler.utils import run_process
 from gprofiler.utils.perf_process import perf_path
 
 logger = get_logger_adapter(__name__)
@@ -37,13 +37,15 @@ def get_perf_available_events() -> Dict[str, str]:
     """
     try:
         result = run_process([perf_path(), "list"], suppress_log=True)
-        output = result.stdout
+        raw_output = result.stdout
 
         # Decode bytes to string if necessary
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", errors="replace")
+        if isinstance(raw_output, bytes):
+            output = raw_output.decode("utf-8", errors="replace")
+        else:
+            output = raw_output
 
-        events = {}
+        events: Dict[str, str] = {}
         current_type = "unknown"
 
         for line in output.splitlines():
@@ -88,10 +90,10 @@ def get_perf_available_events() -> Dict[str, str]:
 
         return events
 
-    except CalledProcessError as e:
+    except CalledProcessError:
         # Cannot use logger here as it may be called before state initialization
         return {}
-    except Exception as e:
+    except Exception:
         # Cannot use logger here as it may be called before state initialization
         return {}
 
@@ -179,7 +181,9 @@ def get_precise_modifier(event_name: str, event_type: str, hypervisor_vendor: st
     return ""
 
 
-def validate_and_get_event_args(event_name: str, hypervisor_vendor: str, hw_events_file: Optional[str] = None) -> List[str]:
+def validate_and_get_event_args(
+    event_name: str, hypervisor_vendor: str, hw_events_file: Optional[str] = None
+) -> List[str]:
     """
     Validate event and return perf arguments for it.
 
@@ -194,7 +198,8 @@ def validate_and_get_event_args(event_name: str, hypervisor_vendor: str, hw_even
     if event_name.startswith("uncore_") or "/uncore_" in event_name:
         raise ValueError(
             f"Uncore event '{event_name}' is not supported for flamegraph generation. "
-            f"Uncore events measure system-wide hardware activity and cannot be attributed to specific processes/threads."
+            f"Uncore events measure system-wide hardware activity and cannot be attributed to specific "
+            f"processes/threads."
         )
 
     # First check perf list
