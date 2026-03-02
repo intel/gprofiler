@@ -60,6 +60,7 @@ from gprofiler.metadata.system_metadata import get_hostname, get_run_mode, get_s
 from gprofiler.platform import is_aarch64, is_linux, is_windows
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.factory import get_profilers
+from gprofiler.profilers.perf import SystemProfiler
 from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase, ProfilerInterface
 from gprofiler.profilers.registry import get_profilers_registry
 from gprofiler.state import State, init_state
@@ -337,7 +338,7 @@ class GProfiler:
         metadata.update({"profiling_mode": self._profiler_state.profiling_mode})
 
         # Add sampling event information if custom event is being used
-        if hasattr(self.system_profiler, "_custom_event_name") and self.system_profiler._custom_event_name:
+        if isinstance(self.system_profiler, SystemProfiler) and self.system_profiler._custom_event_name:
             from gprofiler.platform import get_hypervisor_vendor
             from gprofiler.utils.hw_events import get_event_type, get_perf_available_events, get_precise_modifier
 
@@ -362,13 +363,22 @@ class GProfiler:
                 metadata.update({"sampling_period": self.system_profiler._perf_period})
             else:
                 metadata.update({"sampling_frequency": self.system_profiler._frequency})
-        else:
+        elif isinstance(self.system_profiler, SystemProfiler):
             # Default CPU time-based profiling
             metadata.update(
                 {
                     "sampling_event": "cpu-time",
                     "sampling_mode": "frequency",
-                    "sampling_frequency": self.system_profiler._frequency if self.system_profiler else 11,
+                    "sampling_frequency": self.system_profiler._frequency,
+                }
+            )
+        else:
+            # NoopProfiler - use default values
+            metadata.update(
+                {
+                    "sampling_event": "cpu-time",
+                    "sampling_mode": "frequency",
+                    "sampling_frequency": 11,
                 }
             )
         metrics = self._system_metrics_monitor.get_metrics()
@@ -1003,7 +1013,7 @@ def parse_cmd_args() -> configargparse.Namespace:
         parser.error("--perf-event-period requires --perf-event to be specified")
 
     # Validate --hw-events-file only works with --perf-event
-    if getattr(args, 'hw_events_file', None) and not args.perf_event:
+    if getattr(args, "hw_events_file", None) and not args.perf_event:
         parser.error("--hw-events-file requires --perf-event to be specified")
 
     # Validate and resolve perf event arguments
@@ -1013,15 +1023,17 @@ def parse_cmd_args() -> configargparse.Namespace:
 
         # Validate --perf-event-period and -f/--frequency are mutually exclusive
         if args.perf_event_period and args.frequency != DEFAULT_SAMPLING_FREQUENCY:
-            parser.error("--perf-event-period and -f/--frequency are mutually exclusive. "
-                        "Use --perf-event-period for period-based sampling or -f for frequency-based sampling.")
+            parser.error(
+                "--perf-event-period and -f/--frequency are mutually exclusive. "
+                "Use --perf-event-period for period-based sampling or -f for frequency-based sampling."
+            )
 
         try:
             # Detect hypervisor
             hypervisor_vendor = get_hypervisor_vendor()
 
             # Validate and resolve event
-            hw_events_file = getattr(args, 'hw_events_file', None)
+            hw_events_file = getattr(args, "hw_events_file", None)
             event_args = validate_and_get_event_args(args.perf_event, hypervisor_vendor, hw_events_file)
 
             # Test accessibility with fallback
@@ -1115,6 +1127,7 @@ def log_system_info() -> None:
     logger.info(f"Total RAM: {system_info.memory_capacity_mb / 1024:.2f} GB")
     logger.info(f"Linux distribution: {system_info.os_name} | {system_info.os_release} | {system_info.os_codename}")
     logger.info(f"libc version: {system_info.libc_type}-{system_info.libc_version}")
+    logger.info(f"Hypervisor: {system_info.hypervisor}")
     logger.info(f"Hostname: {system_info.hostname}")
 
 
