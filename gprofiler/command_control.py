@@ -66,7 +66,8 @@ class CommandManager:
                 # Warn if stop queue exceeds limit
                 if len(self.stop_queue) >= STOP_QUEUE_MAX_SIZE:
                     logger.warning(
-                        f"Stop queue exceeds limit (max: {STOP_QUEUE_MAX_SIZE}, current: {len(self.stop_queue)}), but adding command {command.command_id} anyway"
+                        f"Stop queue exceeds limit (max: {STOP_QUEUE_MAX_SIZE}, current: {len(self.stop_queue)}), "
+                        f"but adding command {command.command_id} anyway"
                     )
 
                 self.stop_queue.append(command)
@@ -76,7 +77,8 @@ class CommandManager:
                 # Clear continuous queue before adding new continuous command
                 if self.continuous_queue:
                     logger.info(
-                        f"Clearing {len(self.continuous_queue)} existing continuous commands before adding new command {command.command_id}"
+                        f"Clearing {len(self.continuous_queue)} existing continuous commands "
+                        f"before adding new command {command.command_id}"
                     )
                     self.continuous_queue.clear()
 
@@ -88,7 +90,8 @@ class CommandManager:
                 # Warn if ad-hoc queue exceeds limit
                 if len(self.adhoc_queue) >= ADHOC_QUEUE_MAX_SIZE:
                     logger.warning(
-                        f"Ad-hoc queue exceeds limit (max: {ADHOC_QUEUE_MAX_SIZE}, current: {len(self.adhoc_queue)}), but adding command {command.command_id} anyway"
+                        f"Ad-hoc queue exceeds limit (max: {ADHOC_QUEUE_MAX_SIZE}, current: {len(self.adhoc_queue)}), "
+                        f"but adding command {command.command_id} anyway"
                     )
 
                 self.adhoc_queue.append(command)
@@ -225,5 +228,6 @@ class CommandManager:
             self.continuous_queue.clear()
             if stop_count > 0 or adhoc_count > 0 or continuous_count > 0:
                 logger.info(
-                    f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and {continuous_count} continuous commands from queues"
+                    f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and "
+                    f"{continuous_count} continuous commands from queues"
                 )

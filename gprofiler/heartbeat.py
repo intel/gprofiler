@@ -147,7 +147,8 @@ class HeartbeatClient:
                 return True
             else:
                 logger.error(
-                    f"Failed to report command completion for {command_id}. Status: {response.status_code}, Response: {response.text}"
+                    f"Failed to report command completion for {command_id}. "
+                    f"Status: {response.status_code}, Response: {response.text}"
                 )
                 return False
 
@@ -201,7 +202,8 @@ class HeartbeatClient:
                 commands_to_keep = command_list[-self.max_command_history :]
                 self.executed_command_ids = set(commands_to_keep)
                 logger.info(
-                    f"Cleaned up executed command ID history in memory, keeping {len(self.executed_command_ids)} entries"
+                    f"Cleaned up executed command ID history in memory, "
+                    f"keeping {len(self.executed_command_ids)} entries"
                 )
         except Exception as e:
             logger.warning(f"Failed to cleanup old executed command IDs: {e}")
@@ -645,8 +647,6 @@ class DynamicGProfilerManager:
         if gprofiler is None:
             return
 
-        start_time = datetime.datetime.now()
-
         try:
             if continuous:
                 logger.info(f"Running continuous profiler for command ID: {command_id}")
@@ -674,9 +674,6 @@ class DynamicGProfilerManager:
                 logger.info(f"Profiler run was stopped before completion for command ID: {command_id}")
 
         finally:
-            # Calculate execution time
-            end_time = datetime.datetime.now()
-
             # Dequeue the command now that profiler has finished
             self.command_manager.dequeue_command(command_id)
 
