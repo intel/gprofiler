@@ -19,7 +19,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Deque
+from typing import Any, Deque, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ CONTINUOUS_QUEUE_MAX_SIZE = 1  # Maximum continuous commands to queue
 @dataclass
 class ProfilingCommand:
     """Represents a profiling command with metadata"""
+
     command_id: str
     command_type: str  # 'start' or 'stop'
     profiling_command: Dict[str, Any]
@@ -64,7 +65,9 @@ class CommandManager:
             if command.command_type == "stop":
                 # Warn if stop queue exceeds limit
                 if len(self.stop_queue) >= STOP_QUEUE_MAX_SIZE:
-                    logger.warning(f"Stop queue exceeds limit (max: {STOP_QUEUE_MAX_SIZE}, current: {len(self.stop_queue)}), but adding command {command.command_id} anyway")
+                    logger.warning(
+                        f"Stop queue exceeds limit (max: {STOP_QUEUE_MAX_SIZE}, current: {len(self.stop_queue)}), but adding command {command.command_id} anyway"
+                    )
 
                 self.stop_queue.append(command)
                 logger.info(f"Enqueued stop command {command.command_id} (queue size: {len(self.stop_queue)})")
@@ -72,15 +75,21 @@ class CommandManager:
                 # No need for warnings. The queue is always cleared before adding a new continuous command.
                 # Clear continuous queue before adding new continuous command
                 if self.continuous_queue:
-                    logger.info(f"Clearing {len(self.continuous_queue)} existing continuous commands before adding new command {command.command_id}")
+                    logger.info(
+                        f"Clearing {len(self.continuous_queue)} existing continuous commands before adding new command {command.command_id}"
+                    )
                     self.continuous_queue.clear()
 
                 self.continuous_queue.append(command)
-                logger.info(f"Enqueued continuous command {command.command_id} (queue size: {len(self.continuous_queue)})")
+                logger.info(
+                    f"Enqueued continuous command {command.command_id} (queue size: {len(self.continuous_queue)})"
+                )
             else:
                 # Warn if ad-hoc queue exceeds limit
                 if len(self.adhoc_queue) >= ADHOC_QUEUE_MAX_SIZE:
-                    logger.warning(f"Ad-hoc queue exceeds limit (max: {ADHOC_QUEUE_MAX_SIZE}, current: {len(self.adhoc_queue)}), but adding command {command.command_id} anyway")
+                    logger.warning(
+                        f"Ad-hoc queue exceeds limit (max: {ADHOC_QUEUE_MAX_SIZE}, current: {len(self.adhoc_queue)}), but adding command {command.command_id} anyway"
+                    )
 
                 self.adhoc_queue.append(command)
                 logger.info(f"Enqueued ad-hoc command {command.command_id} (queue size: {len(self.adhoc_queue)})")
@@ -115,7 +124,9 @@ class CommandManager:
             # Priority 3: Continuous commands (long-running)
             if self.continuous_queue:
                 cmd = self.continuous_queue[0]
-                logger.debug(f"Peeking at continuous command {cmd.command_id} from queue (size: {len(self.continuous_queue)})")
+                logger.debug(
+                    f"Peeking at continuous command {cmd.command_id} from queue (size: {len(self.continuous_queue)})"
+                )
                 return cmd
 
             logger.debug("No commands in queues")
@@ -154,7 +165,9 @@ class CommandManager:
                     logger.info(f"Cannot dequeue continuous command {command_id} because it is paused")
                     return False
                 self.continuous_queue.popleft()
-                logger.info(f"Dequeued continuous command {command_id} from queue (remaining: {len(self.continuous_queue)})")
+                logger.info(
+                    f"Dequeued continuous command {command_id} from queue (remaining: {len(self.continuous_queue)})"
+                )
                 return True
 
             logger.debug(f"Command {command_id} not found at first position in any queue. Possibly already dequeued.")
@@ -211,4 +224,6 @@ class CommandManager:
             self.adhoc_queue.clear()
             self.continuous_queue.clear()
             if stop_count > 0 or adhoc_count > 0 or continuous_count > 0:
-                logger.info(f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and {continuous_count} continuous commands from queues")
+                logger.info(
+                    f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and {continuous_count} continuous commands from queues"
+                )

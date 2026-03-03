@@ -20,7 +20,7 @@ import os
 import socket
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import configargparse
 import requests
@@ -37,7 +37,6 @@ from gprofiler.state import get_state
 from gprofiler.usage_loggers import NoopUsageLogger
 from gprofiler.utils import TEMPORARY_STORAGE_PATH, resource_path
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,24 +44,25 @@ class HeartbeatClient:
     """Client for sending heartbeats to the server and receiving profiling commands"""
 
     def __init__(self, api_server: str, service_name: str, server_token: str, verify: bool = True):
-        self.api_server = api_server.rstrip('/')
+        self.api_server = api_server.rstrip("/")
         self.service_name = service_name
         self.server_token = server_token
         self.verify = verify
         self.hostname = get_hostname()
         self.ip_address = self._get_local_ip()
         self.last_command_id: Optional[str] = None
-        self.received_command_ids: set = set()  # Track received command IDs for idempotency (prevent duplicate processing)
+        self.received_command_ids: set = (
+            set()
+        )  # Track received command IDs for idempotency (prevent duplicate processing)
         self.executed_command_ids: set = set()  # Track executed command IDs (commands that were actually processed)
         self.max_command_history = 1000  # Limit command history to prevent memory growth
         self.session = requests.Session()
 
         # Set up authentication headers
         if self.server_token:
-            self.session.headers.update({
-                'Authorization': f'Bearer {self.server_token}',
-                'Content-Type': 'application/json'
-            })
+            self.session.headers.update(
+                {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
+            )
 
     def _get_local_ip(self) -> str:
         """Get the local IP address"""
@@ -85,16 +85,11 @@ class HeartbeatClient:
                 "status": "active",
                 "timestamp": datetime.datetime.now().isoformat(),
                 "received_command_ids": list(self.received_command_ids),
-                "executed_command_ids": list(self.executed_command_ids)
+                "executed_command_ids": list(self.executed_command_ids),
             }
 
             url = f"{self.api_server}/api/metrics/heartbeat"
-            response = self.session.post(
-                url,
-                json=heartbeat_data,
-                verify=self.verify,
-                timeout=30
-            )
+            response = self.session.post(url, json=heartbeat_data, verify=self.verify, timeout=30)
 
             if response.status_code == 200:
                 result = response.json()
@@ -141,22 +136,19 @@ class HeartbeatClient:
                 "status": status,
                 "execution_time": execution_time,
                 "error_message": error_message,
-                "results_path": results_path
+                "results_path": results_path,
             }
 
             url = f"{self.api_server}/api/metrics/command_completion"
-            response = self.session.post(
-                url,
-                json=completion_data,
-                verify=self.verify,
-                timeout=30
-            )
+            response = self.session.post(url, json=completion_data, verify=self.verify, timeout=30)
 
             if response.status_code == 200:
                 logger.info(f"Successfully reported command completion for {command_id} with status: {status}")
                 return True
             else:
-                logger.error(f"Failed to report command completion for {command_id}. Status: {response.status_code}, Response: {response.text}")
+                logger.error(
+                    f"Failed to report command completion for {command_id}. Status: {response.status_code}, Response: {response.text}"
+                )
                 return False
 
         except Exception as e:
@@ -193,9 +185,11 @@ class HeartbeatClient:
                 command_list = list(self.received_command_ids)
                 # Since UUIDs don't sort chronologically, we'll just remove some arbitrary ones
                 # In a real implementation, you'd want to track timestamps
-                commands_to_keep = command_list[-self.max_command_history:]
+                commands_to_keep = command_list[-self.max_command_history :]
                 self.received_command_ids = set(commands_to_keep)
-                logger.info(f"Cleaned up command ID history in memory, keeping {len(self.received_command_ids)} entries")
+                logger.info(
+                    f"Cleaned up command ID history in memory, keeping {len(self.received_command_ids)} entries"
+                )
         except Exception as e:
             logger.warning(f"Failed to cleanup old command IDs: {e}")
 
@@ -204,9 +198,11 @@ class HeartbeatClient:
         try:
             if len(self.executed_command_ids) > self.max_command_history:
                 command_list = list(self.executed_command_ids)
-                commands_to_keep = command_list[-self.max_command_history:]
+                commands_to_keep = command_list[-self.max_command_history :]
                 self.executed_command_ids = set(commands_to_keep)
-                logger.info(f"Cleaned up executed command ID history in memory, keeping {len(self.executed_command_ids)} entries")
+                logger.info(
+                    f"Cleaned up executed command ID history in memory, keeping {len(self.executed_command_ids)} entries"
+                )
         except Exception as e:
             logger.warning(f"Failed to cleanup old executed command IDs: {e}")
 
@@ -217,7 +213,7 @@ class DynamicGProfilerManager:
     def __init__(self, base_args: configargparse.Namespace, heartbeat_client: HeartbeatClient):
         self.base_args = base_args
         self.heartbeat_client = heartbeat_client
-        self.current_gprofiler: Optional['GProfiler'] = None
+        self.current_gprofiler: Optional["GProfiler"] = None
         self.current_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         self.heartbeat_interval = 30  # seconds
@@ -262,7 +258,7 @@ class DynamicGProfilerManager:
                             profiling_command=profiling_command,
                             is_continuous=is_continuous,
                             timestamp=datetime.datetime.now(),
-                            is_paused=False
+                            is_paused=False,
                         )
 
                         # Enqueue command regardless of type
@@ -286,7 +282,7 @@ class DynamicGProfilerManager:
                             status="completed",
                             execution_time=0,
                             error_message=None,
-                            results_path=None
+                            results_path=None,
                         )
                     elif next_cmd.command_type == "start":
                         # Check if current profiler can be paused
@@ -306,7 +302,7 @@ class DynamicGProfilerManager:
                                 status="completed",
                                 execution_time=0,
                                 error_message=None,
-                                results_path=None
+                                results_path=None,
                             )
                         except Exception as e:
                             logger.error(f"Failed to report command completion for {next_cmd.command_id}: {e}")
@@ -319,7 +315,7 @@ class DynamicGProfilerManager:
                             status="failed",
                             execution_time=0,
                             error_message=f"Unknown command type: {next_cmd.command_type}",
-                            results_path=None
+                            results_path=None,
                         )
 
                 # Wait for next heartbeat
@@ -382,7 +378,7 @@ class DynamicGProfilerManager:
                 profiling_command=profiling_command,
                 is_continuous=is_continuous,
                 timestamp=datetime.datetime.now(),
-                is_paused=False
+                is_paused=False,
             )
             self.current_command_start_time = datetime.datetime.now()
 
@@ -395,7 +391,7 @@ class DynamicGProfilerManager:
                     getattr(new_args, "duration", DEFAULT_PROFILING_DURATION),
                     command_id,
                 ),
-                daemon=True
+                daemon=True,
             )
             self.current_thread.start()
 
@@ -405,11 +401,7 @@ class DynamicGProfilerManager:
             logger.error(f"Failed to start new profiler: {e}", exc_info=True)
             # Report failure to the server
             self.heartbeat_client.send_command_completion(
-                command_id=command_id,
-                status="failed",
-                execution_time=0,
-                error_message=str(e),
-                results_path=None
+                command_id=command_id, status="failed", execution_time=0, error_message=str(e), results_path=None
             )
             # Clear current command tracking on failure
             self.current_command = None
@@ -575,7 +567,7 @@ class DynamicGProfilerManager:
 
         return new_args
 
-    def _create_gprofiler_instance(self, args: configargparse.Namespace) -> 'GProfiler':
+    def _create_gprofiler_instance(self, args: configargparse.Namespace) -> "GProfiler":
         """Create a new GProfiler instance with the given args"""
         if args is None:
             return None
@@ -593,10 +585,10 @@ class DynamicGProfilerManager:
                 token=args.server_token,
                 service_name=args.service_name,
                 server_address=args.server_host,
-                curlify_requests=getattr(args, 'curlify_requests', False),
+                curlify_requests=getattr(args, "curlify_requests", False),
                 hostname=get_hostname(),
                 verify=args.verify,
-                upload_timeout=getattr(args, 'server-upload-timeout', 120)  # Default to 120 seconds
+                upload_timeout=getattr(args, "server-upload-timeout", 120),  # Default to 120 seconds
             )
 
         enrichment_options = EnrichmentOptions(
@@ -609,12 +601,12 @@ class DynamicGProfilerManager:
 
         # Create external metadata path if specified
         external_metadata_path = None
-        if hasattr(args, 'external_metadata') and args.external_metadata:
+        if hasattr(args, "external_metadata") and args.external_metadata:
             external_metadata_path = Path(args.external_metadata)
 
         # Create heartbeat file path if specified
         heartbeat_file_path = None
-        if hasattr(args, 'heartbeat_file') and args.heartbeat_file:
+        if hasattr(args, "heartbeat_file") and args.heartbeat_file:
             heartbeat_file_path = Path(args.heartbeat_file)
 
         # Create perfspect path if specified
@@ -625,11 +617,11 @@ class DynamicGProfilerManager:
         return GProfiler(
             output_dir=args.output_dir,
             flamegraph=args.flamegraph,
-            rotating_output=getattr(args, 'rotating_output', False),
-            rootless=getattr(args, 'rootless', False),
+            rotating_output=getattr(args, "rotating_output", False),
+            rootless=getattr(args, "rootless", False),
             profiler_api_client=profiler_api_client,
-            collect_metrics=getattr(args, 'collect_metrics', True),
-            collect_metadata=getattr(args, 'collect_metadata', True),
+            collect_metrics=getattr(args, "collect_metrics", True),
+            collect_metadata=getattr(args, "collect_metadata", True),
             enrichment_options=enrichment_options,
             state=state,
             usage_logger=NoopUsageLogger(),  # Simplified for dynamic profiling
@@ -638,7 +630,7 @@ class DynamicGProfilerManager:
             profile_api_version=args.profile_api_version,
             profiling_mode=args.profiling_mode,
             collect_hw_metrics=getattr(args, "collect_hw_metrics", False),
-            profile_spawned_processes=getattr(args, 'profile_spawned_processes', False),
+            profile_spawned_processes=getattr(args, "profile_spawned_processes", False),
             remote_logs_handler=None,  # Simplified for dynamic profiling
             controller_process=None,
             processes_to_profile=processes_to_profile,
@@ -648,7 +640,7 @@ class DynamicGProfilerManager:
             perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
         )
 
-    def _run_profiler(self, gprofiler: 'GProfiler', continuous: bool, duration: int, command_id: str):
+    def _run_profiler(self, gprofiler: "GProfiler", continuous: bool, duration: int, command_id: str):
         """Run the profiler with specified args"""
         if gprofiler is None:
             return
