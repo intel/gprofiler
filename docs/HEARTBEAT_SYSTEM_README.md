@@ -42,6 +42,8 @@ This document describes the implementation of a centralized profiling control sy
 - **Heartbeat communication** with configurable intervals
 - **Dynamic profiling** based on server commands
 - **Command-driven execution** (start/stop profiling)
+- **Priority-based command queue** with separate tiers for stop, ad-hoc, and continuous commands
+- **Continuous command pause/resume** to yield execution to higher-priority ad-hoc commands
 - **Idempotency** to prevent duplicate command execution
 - **Persistent command tracking** across agent restarts
 - **Graceful error handling** and retry logic
@@ -358,11 +360,14 @@ export GPROFILER_SERVER="http://localhost:8080"
 ### Agent Logic
 
 1. **Heartbeat Loop**: Sends heartbeats at configured intervals
-2. **Command Processing**:
-   - `start`: Stop current profiler (if any) and start new one with given config
-   - `stop`: Stop current profiler without starting a new one
-3. **Idempotency**: Track executed command IDs to prevent duplicates
-4. **Persistence**: Save executed command IDs to disk for restart resilience
+2. **Command Enqueueing**: Each received command is validated for idempotency and placed in the appropriate priority queue via `CommandManager`
+3. **Command Processing** (on every heartbeat tick):
+   - Peeks at the highest-priority pending command with `get_next_command()`
+   - `stop`: Immediately stops the current profiler, clears all queues, and reports completion
+   - `start` (ad-hoc or continuous): If the current profiler is a pausable continuous run, it is paused to make room; then the new profiler is started in a background thread
+   - On profiler thread exit, calls `dequeue_command()` to remove the finished command and allow the next queued command to be scheduled
+4. **Idempotency**: Received and executed command IDs are tracked in memory (up to 1000 entries each) to prevent duplicate processing
+5. **Persistence**: Executed command state is maintained in memory across heartbeat iterations
 
 ### Command Flow
 
@@ -370,17 +375,73 @@ export GPROFILER_SERVER="http://localhost:8080"
 1. User submits profiling request to backend
    ↓
 2. Backend creates command with unique ID
-   ↓  
+   ↓
 3. Agent sends heartbeat to backend
    ↓
 4. Backend responds with pending command
    ↓
-5. Agent executes command (start/stop profiling)
+5. Agent checks idempotency (skip if already received)
    ↓
-6. Agent reports completion to backend
+6. Agent enqueues command in the appropriate priority queue
+   (stop_queue | adhoc_queue | continuous_queue)
    ↓
-7. Backend updates command status
+7. Agent peeks at highest-priority queued command
+   ↓
+8. If ready, agent executes command (start/stop profiling)
+   - stop: clears all queues, stops profiler
+   - start (ad-hoc): pauses current continuous profiler if running,
+     starts ad-hoc profiler in background thread
+   - start (continuous): starts continuous profiler in background thread
+   ↓
+9. Profiler thread finishes → dequeues command → next command scheduled
+   ↓
+10. Agent reports completion to backend
+    ↓
+11. Backend updates command status
 ```
+
+### Command Queue Architecture
+
+The `CommandManager` class (in `gprofiler/command_control.py`) manages three independent FIFO queues and enforces priority-based scheduling.
+
+#### Queue Types and Size Limits
+
+| Queue | Purpose | Max Size | Overflow Behaviour |
+|---|---|---|---|
+| `stop_queue` | Immediate stop commands | 1 | Warning logged, command still added |
+| `adhoc_queue` | Single-run (`continuous=False`) start commands | 10 | Warning logged, command still added |
+| `continuous_queue` | Long-running (`continuous=True`) start commands | 1 | Previous continuous command is discarded |
+
+#### Priority Ordering
+
+```
+stop_queue  (highest)  →  adhoc_queue  →  continuous_queue  (lowest)
+```
+
+`get_next_command()` always peeks at queues in this order, so a pending stop command pre-empts any ad-hoc or continuous work, and an ad-hoc command pre-empts a running continuous profiler.
+
+#### Continuous Command Pause Mechanism
+
+When a new start command arrives while a **continuous** profiler is running and there is a higher-priority ad-hoc command waiting:
+
+1. `pause_command(current_command_id)` is called, marking the continuous command's `is_paused = True` in the queue.
+2. `_stop_current_profiler()` terminates the running profiler thread.
+3. The paused continuous command **remains in the queue** (it cannot be dequeued while `is_paused=True`).
+4. The ad-hoc command is picked up on the next tick, started, and eventually dequeued when its profiler thread exits.
+5. Once the ad-hoc queue is empty, the paused continuous command is at the head of `continuous_queue` and is restarted on the next tick.
+
+> **Note:** Ad-hoc and stop commands cannot be paused—any attempt is rejected with a warning log.
+
+#### Key `CommandManager` Methods
+
+| Method | Description |
+|---|---|
+| `enqueue_command(cmd)` | Routes command to the correct queue; clears `continuous_queue` before inserting a new continuous command |
+| `get_next_command()` | Peeks at the highest-priority pending command without removing it |
+| `dequeue_command(cmd_id)` | Removes a command from the head of its queue; refuses to dequeue a paused continuous command |
+| `pause_command(cmd_id)` | Sets `is_paused=True` on the first continuous command matching `cmd_id` |
+| `has_queued_commands()` | Returns `True` if any queue is non-empty |
+| `clear_queues()` | Empties all queues (called on stop command or shutdown) |
 
 ## Configuration
 
@@ -442,8 +503,8 @@ export GPROFILER_SERVER="http://localhost:8080"
 - **Command Scheduling**: Schedule profiling commands for future execution  
 - **Resource Monitoring**: Check system resources before starting profiling
 - **Multi-tenant Support**: Isolation between different services/teams
-- **Command Prioritization**: Priority queues for urgent profiling requests
 - **Distributed Coordination**: Coordinate profiling across multiple agents
+- **Continuous Command Resume**: Formal unpause/resume API so that a paused continuous command can carry its original configuration forward without re-enqueueing
 
 ## Troubleshooting
 
