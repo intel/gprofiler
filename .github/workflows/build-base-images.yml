@@ -1,0 +1,208 @@
+name: Build Base Images
+
+# This workflow builds heavy, rarely-changing components as Docker images
+# and publishes them to GitHub Container Registry (GHCR).
+# These images are used by the main build workflow to speed up builds significantly.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'scripts/pyspy_*.txt'
+      - 'scripts/pyspy_*.sh'
+      - 'scripts/rbspy_*.sh'
+      - 'scripts/perf_*.sh'
+      - 'scripts/phpspy_*.sh'
+      - 'scripts/async_profiler_*.sh'
+      - 'scripts/burn_*.sh'
+      - 'scripts/burn_*.txt'
+      - 'scripts/pyperf_*.sh'
+      - 'scripts/bcc_*.sh'
+      - 'scripts/node_builder_*.sh'
+      - 'scripts/build_node_package.sh'
+      - 'scripts/python310_build.sh'
+      - 'scripts/openssl_build.sh'
+      - 'scripts/prepare_centos.sh'
+      - 'scripts/dotnet_*.sh'
+      - 'scripts/dotnet_*.txt'
+      - 'scripts/libunwind_build.sh'
+      - 'scripts/prepare_machine-unknown-linux-musl.sh'
+      - 'scripts/fix_centos*.sh'
+      - 'scripts/pdeathsigger.c'
+      - '.github/workflows/build-base-images.yml'
+      - 'executable.Dockerfile'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-base-images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push all base images
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          echo "Building and pushing base images to GHCR..."
+          echo "Repository: ${REPO_LOWER}"
+
+          # Define all build args once to avoid repetition
+          # All args must be passed to each build to avoid "blank base name" errors
+          BUILD_ARGS="
+            --build-arg PYSPY_RUST_BUILDER_VERSION=@sha256:541a1720c1cedddae9e17b4214075bf57c20bc7b176b4bba6bce3437c44d51ef
+            --build-arg RBSPY_RUST_BUILDER_VERSION=@sha256:65b63b7d003f7a492cc8e550a4830aaa1f4155b74387549a82985c8efb3d0e88
+            --build-arg PERF_BUILDER_UBUNTU=@sha256:dca176c9663a7ba4c1f0e710986f5a25e672842963d95b960191e2d9f7185ebe
+            --build-arg PHPSPY_BUILDER_UBUNTU=@sha256:cf31af331f38d1d7158470e095b132acd126a7180a54f263d386da88eb681d93
+            --build-arg AP_BUILDER_CENTOS=@sha256:0f4ec88e21daf75124b8a9e5ca03c37a5e937e0e108a255d890492430789b60e
+            --build-arg AP_BUILDER_ALPINE=@sha256:69704ef328d05a9f806b6b8502915e6a0a4faa4d72018dc42343f511490daf8a
+            --build-arg AP_CENTOS_MIN=:6
+            --build-arg BURN_BUILDER_GOLANG=@sha256:f7d3519759ba6988a2b73b5874b17c5958ac7d0aa48a8b1d84d66ef25fa345f1
+            --build-arg GPROFILER_BUILDER=@sha256:be65f488b7764ad3638f236b7b515b3678369a5124c47b8d32916d6487418ea4
+            --build-arg PYPERF_BUILDER_UBUNTU=@sha256:cf31af331f38d1d7158470e095b132acd126a7180a54f263d386da88eb681d93
+            --build-arg DOTNET_BUILDER=@sha256:525ce79a6f545131df515ce34f7ee086eb18e4d707eff9676b2678f2f23b6d9e
+            --build-arg NODE_PACKAGE_BUILDER_MUSL=@sha256:69704ef328d05a9f806b6b8502915e6a0a4faa4d72018dc42343f511490daf8a
+            --build-arg NODE_PACKAGE_BUILDER_GLIBC=centos/devtoolset-7-toolchain-centos7@sha256:24d4c230cb1fe8e68cefe068458f52f69a1915dd6f6c3ad18aa37c2b8fa3e4e1
+          "
+
+          echo "Building py-spy (Rust Python profiler)..."
+          docker buildx build -f executable.Dockerfile \
+            --target pyspy-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-pyspy:latest" \
+            --push \
+            .
+
+          echo "Building rbspy (Rust Ruby profiler)..."
+          docker buildx build -f executable.Dockerfile \
+            --target rbspy-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-rbspy:latest" \
+            --push \
+            .
+
+          echo "Building dotnet-trace..."
+          docker buildx build -f executable.Dockerfile \
+            --target dotnet-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-dotnet:latest" \
+            --push \
+            .
+
+          echo "Building perf (Linux perf tool)..."
+          docker buildx build -f executable.Dockerfile \
+            --target perf-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-perf:latest" \
+            --push \
+            .
+
+          echo "Building phpspy..."
+          docker buildx build -f executable.Dockerfile \
+            --target phpspy-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-phpspy:latest" \
+            --push \
+            .
+
+          echo "Building async-profiler (glibc)..."
+          docker buildx build -f executable.Dockerfile \
+            --target async-profiler-builder-glibc \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc:latest" \
+            --push \
+            .
+
+          echo "Building async-profiler CentOS test (glibc)..."
+          docker buildx build -f executable.Dockerfile \
+            --target async-profiler-centos-min-test-glibc \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc-tested:latest" \
+            --push \
+            .
+
+          echo "Building async-profiler (musl)..."
+          docker buildx build -f executable.Dockerfile \
+            --target async-profiler-builder-musl \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-musl:latest" \
+            --push \
+            .
+
+          echo "Building burn (Go tool)..."
+          docker buildx build -f executable.Dockerfile \
+            --target burn-builder \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-burn:latest" \
+            --push \
+            .
+
+          echo "Building node package (musl)..."
+          docker buildx build -f executable.Dockerfile \
+            --target node-package-builder-musl \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-node-musl:latest" \
+            --push \
+            .
+
+          echo "Building BCC/PyPerf..."
+          docker buildx build -f executable.Dockerfile \
+            --target bcc-build \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-bcc:latest" \
+            --push \
+            .
+
+          echo "Building node package (glibc)..."
+          docker buildx build -f executable.Dockerfile \
+            --target node-package-builder-glibc \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-node-glibc:latest" \
+            --push \
+            .
+
+          echo "Building Python 3.10 base..."
+          docker buildx build -f executable.Dockerfile \
+            --target build-prepare \
+            $BUILD_ARGS \
+            -t "ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest" \
+            --push \
+            .
+
+          echo "✅ All base images built and pushed successfully!"
+
+      - name: Make images public
+        continue-on-error: true
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "Setting package visibility to public for easier access..."
+
+          for pkg in gprofiler-pyspy gprofiler-rbspy gprofiler-dotnet gprofiler-perf gprofiler-phpspy gprofiler-async-profiler-glibc gprofiler-async-profiler-glibc-tested gprofiler-async-profiler-musl gprofiler-burn gprofiler-node-musl gprofiler-bcc gprofiler-node-glibc gprofiler-python-base; do
+            echo "Setting ${pkg} to public..."
+            gh api -X PATCH "/users/${{ github.repository_owner }}/packages/container/${pkg}" \
+              -f visibility=public 2>/dev/null || \
+            gh api -X PATCH "/orgs/${{ github.repository_owner }}/packages/container/${pkg}" \
+              -f visibility=public 2>/dev/null || \
+            echo "  ⚠️  Could not set ${pkg} to public (may need manual update or doesn't exist yet)"
+          done
+
+          echo "✅ Visibility update completed!"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
