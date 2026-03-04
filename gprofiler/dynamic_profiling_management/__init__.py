@@ -14,7 +14,6 @@ from gprofiler.client import ProfilerAPIClient
 from gprofiler.dynamic_profiling_management.command_control import CommandManager, ProfilingCommand
 from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.system_metadata import get_hostname
-from gprofiler.profilers.perf_events import validate_and_normalize_events
 from gprofiler.state import get_state
 from gprofiler.usage_loggers import NoopUsageLogger
 from gprofiler.utils import resource_path
@@ -124,7 +123,6 @@ def _apply_profiler_configs(new_args: configargparse.Namespace, profiler_configs
             perf_events = [perf_events]
         elif not isinstance(perf_events, list):
             perf_events = ["cycles"]
-        perf_events = validate_and_normalize_events(perf_events)
 
         if perf_mode == "enabled_restricted":
             new_args.max_system_processes_for_system_profilers = 600

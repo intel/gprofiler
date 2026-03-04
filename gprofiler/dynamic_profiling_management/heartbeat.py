@@ -27,12 +27,6 @@ from gprofiler.dynamic_profiling_management.ad_hoc import AdhocProfilerSlot
 from gprofiler.dynamic_profiling_management.command_control import CommandManager, ProfilingCommand
 from gprofiler.dynamic_profiling_management.continuous import ContinuousProfilerSlot
 from gprofiler.metadata.system_metadata import get_hostname
-from gprofiler.metrics_publisher import (
-    MetricsPublisher,
-    RESPONSE_TYPE_SUCCESS,
-    RESPONSE_TYPE_FAILURE,
-)
-from gprofiler.profilers.pmu_manager import get_pmu_manager
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +70,6 @@ class HeartbeatClient:
         self._refresh_stop_event = threading.Event()
 
         self._init_session()
-        self.pmu_manager = get_pmu_manager()
 
         if self.server_token:
             self.session.headers.update(
@@ -156,7 +149,6 @@ class HeartbeatClient:
 
     def send_heartbeat(self) -> Optional[Dict[str, Any]]:
         try:
-            perf_supported_events = self.pmu_manager.get_supported_events()
             heartbeat_data = {
                 "ip_address": self.ip_address,
                 "hostname": self.hostname,
@@ -166,15 +158,11 @@ class HeartbeatClient:
                 "timestamp": datetime.datetime.now().isoformat(),
                 "received_command_ids": list(self.received_command_ids),
                 "executed_command_ids": list(self.executed_command_ids),
-                "perf_supported_events": perf_supported_events,
             }
             url = f"{self.api_server}/api/metrics/heartbeat"
             response = self.session.post(url, json=heartbeat_data, timeout=30)
 
             if response.status_code == 200:
-                MetricsPublisher.get_instance().send_sli_metric(
-                    response_type=RESPONSE_TYPE_SUCCESS, method_name="send_heartbeat"
-                )
                 result = response.json()
                 if result.get("success") and result.get("profiling_command"):
                     logger.info(f"Received profiling command from server: {result.get('command_id')}")
@@ -183,19 +171,9 @@ class HeartbeatClient:
                 return None
             else:
                 logger.warning(f"Heartbeat failed with status {response.status_code}: {response.text}")
-                MetricsPublisher.get_instance().send_sli_metric(
-                    response_type=RESPONSE_TYPE_FAILURE,
-                    method_name="send_heartbeat",
-                    extra_tags={"status_code": response.status_code},
-                )
                 return None
         except Exception as e:
             logger.error(f"Failed to send heartbeat: {e}")
-            MetricsPublisher.get_instance().send_sli_metric(
-                response_type=RESPONSE_TYPE_FAILURE,
-                method_name="send_heartbeat",
-                extra_tags={"error": str(e)},
-            )
             return None
 
     def send_command_completion(
