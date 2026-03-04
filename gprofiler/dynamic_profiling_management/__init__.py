@@ -206,11 +206,6 @@ def create_gprofiler_instance(args: configargparse.Namespace) -> Optional["GProf
             hostname=get_hostname(),
             verify=args.verify,
             upload_timeout=getattr(args, "server-upload-timeout", 120),
-            tls_client_cert=getattr(args, "tls_client_cert", None),
-            tls_client_key=getattr(args, "tls_client_key", None),
-            tls_ca_bundle=getattr(args, "tls_ca_bundle", None),
-            tls_cert_refresh_enabled=getattr(args, "tls_cert_refresh_enabled", False),
-            tls_cert_refresh_interval=getattr(args, "tls_cert_refresh_interval", 21600),
         )
 
     enrichment_options = EnrichmentOptions(

@@ -44,95 +44,23 @@ class HeartbeatClient:
         api_server: str,
         service_name: str,
         server_token: str,
-        verify: bool = True,
-        tls_client_cert: Optional[str] = None,
-        tls_client_key: Optional[str] = None,
-        tls_ca_bundle: Optional[str] = None,
-        tls_cert_refresh_enabled: bool = False,
-        tls_cert_refresh_interval: int = 21600,
     ):
         self.api_server = api_server.rstrip("/")
         self.service_name = service_name
         self.server_token = server_token
-        self.verify = verify
-        self.tls_client_cert = tls_client_cert
-        self.tls_client_key = tls_client_key
-        self.tls_ca_bundle = tls_ca_bundle
-        self.tls_cert_refresh_enabled = tls_cert_refresh_enabled
-        self.tls_cert_refresh_interval = tls_cert_refresh_interval
         self.hostname = get_hostname()
         self.ip_address = self._get_local_ip()
         self.last_command_id: Optional[str] = None
         self.received_command_ids: set = set()
         self.executed_command_ids: set = set()
         self.max_command_history = 1000
-        self._refresh_thread: Optional[threading.Thread] = None
-        self._refresh_stop_event = threading.Event()
 
-        self._init_session()
+        self.session = requests.Session()
 
         if self.server_token:
             self.session.headers.update(
                 {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
             )
-
-        if self.tls_cert_refresh_enabled and (self.tls_client_cert or self.tls_ca_bundle):
-            self._start_cert_refresh_thread()
-
-    # --- TLS session management ---
-
-    def _init_session(self) -> None:
-        self.session = requests.Session()
-        if self.tls_ca_bundle:
-            self.session.verify = self.tls_ca_bundle
-        else:
-            self.session.verify = self.verify
-        if self.tls_client_cert and self.tls_client_key:
-            self.session.cert = (self.tls_client_cert, self.tls_client_key)
-            logger.debug(f"HeartbeatClient: mTLS enabled with client cert: {self.tls_client_cert}")
-        elif self.tls_client_cert or self.tls_client_key:
-            logger.warning(
-                "HeartbeatClient: Both --tls-client-cert and --tls-client-key must be provided for mTLS. "
-                "Ignoring partial configuration."
-            )
-
-    def _refresh_session(self) -> None:
-        old_session = self.session
-        try:
-            logger.debug("HeartbeatClient: Refreshing TLS session to reload certificates")
-            self._init_session()
-            if self.server_token:
-                self.session.headers.update(
-                    {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
-                )
-            old_session.close()
-            logger.info("HeartbeatClient: TLS session refreshed successfully")
-        except Exception as e:
-            self.session = old_session
-            logger.error(f"HeartbeatClient: Failed to refresh TLS session: {e}. Will retry on next interval.")
-
-    def _cert_refresh_loop(self) -> None:
-        logger.info(
-            f"HeartbeatClient: Certificate refresh thread started (interval: {self.tls_cert_refresh_interval}s)"
-        )
-        while not self._refresh_stop_event.wait(self.tls_cert_refresh_interval):
-            self._refresh_session()
-        logger.debug("HeartbeatClient: Certificate refresh thread stopped")
-
-    def _start_cert_refresh_thread(self) -> None:
-        if self._refresh_thread is None or not self._refresh_thread.is_alive():
-            self._refresh_thread = threading.Thread(
-                target=self._cert_refresh_loop, daemon=True, name="HeartbeatClient-CertRefresh"
-            )
-            self._refresh_thread.start()
-
-    def stop_cert_refresh(self) -> None:
-        if self._refresh_thread and self._refresh_thread.is_alive():
-            logger.debug("HeartbeatClient: Stopping certificate refresh thread")
-            self._refresh_stop_event.set()
-            self._refresh_thread.join(timeout=5)
-            if self._refresh_thread.is_alive():
-                logger.warning("HeartbeatClient: Certificate refresh thread did not stop gracefully")
 
     # --- Networking helpers ---
 

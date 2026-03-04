@@ -1300,7 +1300,6 @@ def main() -> None:
                 api_server=args.api_server,
                 service_name=args.service_name,
                 server_token=args.server_token,
-                verify=args.verify,
             )
 
             # Create dynamic profiler manager
