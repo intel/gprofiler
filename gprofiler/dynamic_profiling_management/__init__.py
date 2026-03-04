@@ -116,33 +116,15 @@ def _apply_profiler_configs(new_args: configargparse.Namespace, profiler_configs
 
     # --- Perf ---
     perf_config = profiler_configs.get("perf", "enabled_restricted")
-    if isinstance(perf_config, dict):
-        perf_mode = perf_config.get("mode", "enabled_restricted")
-        perf_events = perf_config.get("events", ["cycles"])
-        if isinstance(perf_events, str):
-            perf_events = [perf_events]
-        elif not isinstance(perf_events, list):
-            perf_events = ["cycles"]
-
-        if perf_mode == "enabled_restricted":
-            new_args.max_system_processes_for_system_profilers = 600
-            new_args.perf_max_docker_containers = 2
-        elif perf_mode == "enabled_aggressive":
-            new_args.max_system_processes_for_system_profilers = 1500
-            new_args.perf_max_docker_containers = 50
-        elif perf_mode == "disabled":
-            new_args.perf_mode = "disabled"
-        new_args.perf_events = ",".join(perf_events)
-    else:
-        if perf_config == "enabled_restricted":
-            new_args.max_system_processes_for_system_profilers = 600
-            new_args.perf_max_docker_containers = 2
-        elif perf_config == "enabled_aggressive":
-            new_args.max_system_processes_for_system_profilers = 1500
-            new_args.perf_max_docker_containers = 50
-        elif perf_config == "disabled":
-            new_args.perf_mode = "disabled"
-        new_args.perf_events = "cycles"
+    perf_mode = perf_config.get("mode", "enabled_restricted") if isinstance(perf_config, dict) else perf_config
+    if perf_mode == "enabled_restricted":
+        new_args.max_system_processes_for_system_profilers = 600
+        new_args.perf_max_docker_containers = 2
+    elif perf_mode == "enabled_aggressive":
+        new_args.max_system_processes_for_system_profilers = 1500
+        new_args.perf_max_docker_containers = 50
+    elif perf_mode == "disabled":
+        new_args.perf_mode = "disabled"
 
     # --- Python ---
     pyperf_config = profiler_configs.get("pyperf", "enabled")
