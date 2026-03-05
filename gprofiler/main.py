@@ -46,9 +46,9 @@ from gprofiler.client import (
 from gprofiler.consts import CPU_PROFILING_MODE
 from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.diagnostics import log_diagnostics, set_diagnostics
+from gprofiler.dynamic_profiling_management.heartbeat import DynamicGProfilerManager, HeartbeatClient
 from gprofiler.exceptions import APIError, NoProfilersEnabledError
 from gprofiler.gprofiler_types import ProcessToProfileData, UserArgs, integers_list, positive_integer
-from gprofiler.dynamic_profiling_management.heartbeat import DynamicGProfilerManager, HeartbeatClient
 from gprofiler.hw_metrics import HWMetricsMonitor, HWMetricsMonitorBase, NoopHWMetricsMonitor
 from gprofiler.log import RemoteLogsHandler, initial_root_logger_setup
 from gprofiler.merge import concatenate_from_external_file, concatenate_profiles, merge_profiles

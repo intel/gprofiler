@@ -16,7 +16,7 @@
 
 import datetime
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from gprofiler.dynamic_profiling_management import ProfilerSlotBase
 
@@ -33,7 +33,7 @@ class ContinuousProfilerSlot(ProfilerSlotBase):
 
     SLOT_NAME = "continuous"
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.command_start_time: Optional[datetime.datetime] = None
 
