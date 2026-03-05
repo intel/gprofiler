@@ -87,6 +87,7 @@ jobs:
             --target pyspy-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-pyspy:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -95,6 +96,7 @@ jobs:
             --target rbspy-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-rbspy:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -103,6 +105,7 @@ jobs:
             --target dotnet-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-dotnet:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -111,6 +114,7 @@ jobs:
             --target perf-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-perf:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -119,6 +123,7 @@ jobs:
             --target phpspy-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-phpspy:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -127,6 +132,7 @@ jobs:
             --target async-profiler-builder-glibc \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -135,6 +141,7 @@ jobs:
             --target async-profiler-centos-min-test-glibc \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-glibc-tested:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -143,6 +150,7 @@ jobs:
             --target async-profiler-builder-musl \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-async-profiler-musl:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -151,6 +159,7 @@ jobs:
             --target burn-builder \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-burn:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -159,6 +168,7 @@ jobs:
             --target node-package-builder-musl \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-node-musl:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -167,6 +177,7 @@ jobs:
             --target bcc-build \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-bcc:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -175,6 +186,7 @@ jobs:
             --target node-package-builder-glibc \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-node-glibc:latest" \
+            --cache-to type=inline \
             --push \
             .
 
@@ -183,6 +195,7 @@ jobs:
             --target build-prepare \
             $BUILD_ARGS \
             -t "ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest" \
+            --cache-to type=inline \
             --push \
             .
 
