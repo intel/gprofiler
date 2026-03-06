@@ -77,20 +77,32 @@ def test_mutex_taken_twice(
     """
     # Run the first one continuously
     with run_gprofiler_container(docker_client, gprofiler_docker_image, extra_profiler_args=["-c"]) as gprofiler1:
+        # Wait for first instance to acquire mutex and start running
         wait_for_log(gprofiler1, "Running gProfiler", 0)
+
+        # Verify first container is still running
+        gprofiler1.reload()
+        assert gprofiler1.status == "running", "First gProfiler instance should be running"
+
         gprofiler2 = start_gprofiler(docker_client, gprofiler_docker_image)
 
         # Second instance should fail to acquire mutex and exit with error
         with pytest.raises(ContainerError) as e:
             wait_for_container(gprofiler2)
 
-        assert e.value.exit_status == 1
+        # Verify error details
+        assert e.value.exit_status == 1, "Second instance should exit with status 1 when mutex is held"
         assert e.value.stderr == (
             b"Could not acquire gProfiler's lock. Is it already running?"
             b" Try 'sudo netstat -xp | grep gprofiler' to see which process holds the lock.\n"
-        )
+        ), "Error message should indicate mutex is already held"
 
-    wait_for_container(gprofiler1)  # without an error as well
+        # Verify first instance is still running after second failed
+        gprofiler1.reload()
+        assert gprofiler1.status == "running", "First gProfiler instance should still be running"
+
+    # First container should exit cleanly when stopped
+    wait_for_container(gprofiler1)
 
 
 def test_not_root(
