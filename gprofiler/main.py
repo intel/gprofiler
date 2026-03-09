@@ -964,6 +964,14 @@ def parse_cmd_args() -> configargparse.Namespace:
     args.perf_inject = args.nodejs_mode == "perf"
     args.perf_node_attach = args.nodejs_mode == "attach-maps"
 
+    # Validate --perf-event-period and -f/--frequency are mutually exclusive
+    # Must check before defaults are applied (args.frequency is None if not explicitly provided)
+    if args.perf_event_period and args.frequency is not None:
+        parser.error(
+            "--perf-event-period and -f/--frequency are mutually exclusive. "
+            "Use --perf-event-period for period-based sampling or -f for frequency-based sampling."
+        )
+
     if args.profiling_mode == CPU_PROFILING_MODE:
         if args.alloc_interval:
             parser.error("--alloc-interval is only allowed in allocation profiling (--mode=allocation)")
@@ -1016,17 +1024,14 @@ def parse_cmd_args() -> configargparse.Namespace:
     if getattr(args, "hw_events_file", None) and not args.perf_event:
         parser.error("--hw-events-file requires --perf-event to be specified")
 
+    # Validate --perf-event only works with cpu profiling mode
+    if args.perf_event and args.profiling_mode != CPU_PROFILING_MODE:
+        parser.error("--perf-event is only supported in cpu profiling mode (--mode=cpu)")
+
     # Validate and resolve perf event arguments
     if args.perf_event:
         from gprofiler.platform import get_hypervisor_vendor
         from gprofiler.utils.hw_events import validate_and_get_event_args, validate_event_with_fallback
-
-        # Validate --perf-event-period and -f/--frequency are mutually exclusive
-        if args.perf_event_period and args.frequency != DEFAULT_SAMPLING_FREQUENCY:
-            parser.error(
-                "--perf-event-period and -f/--frequency are mutually exclusive. "
-                "Use --perf-event-period for period-based sampling or -f for frequency-based sampling."
-            )
 
         try:
             # Detect hypervisor

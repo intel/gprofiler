@@ -85,6 +85,9 @@ def get_hypervisor_vendor() -> str:
     Returns hypervisor vendor string (e.g., "KVMKVMKVM", "VMwareVMware") or "NONE" for bare metal.
     """
     if not is_linux():
+        # Hardware event profiling with custom PMU events uses Linux perf subsystem and is Linux-only.
+        # No plans to support non-Linux platforms as they use different performance monitoring mechanisms.
+        # TODO: Update to return "UNKNOWN" or implement detection when Windows support is enabled.
         return "NONE"
 
     try:
