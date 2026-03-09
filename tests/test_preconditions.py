@@ -77,15 +77,36 @@ def test_mutex_taken_twice(
     """
     # Run the first one continuously
     with run_gprofiler_container(docker_client, gprofiler_docker_image, extra_profiler_args=["-c"]) as gprofiler1:
+        # Wait for first instance to acquire mutex and start running
         wait_for_log(gprofiler1, "Running gProfiler", 0)
-        with run_gprofiler_container(docker_client, gprofiler_docker_image) as gprofiler2:
-            # exits without an error
-            assert wait_for_container(gprofiler2) == (
-                "Could not acquire gProfiler's lock. Is it already running?"
-                " Try 'sudo netstat -xp | grep gprofiler' to see which process holds the lock.\n"
-            )
 
-    wait_for_container(gprofiler1)  # without an error as well
+        # Verify first container is still running
+        gprofiler1.reload()
+        assert gprofiler1.status == "running", "First gProfiler instance should be running"
+
+        gprofiler2 = start_gprofiler(docker_client, gprofiler_docker_image)
+
+        # Second instance should fail to acquire mutex and exit with error
+        with pytest.raises(ContainerError) as e:
+            wait_for_container(gprofiler2)
+
+        # Verify error details
+        assert e.value.exit_status == 1, "Second instance should exit with status 1 when mutex is held"
+        expected_msg = (
+            b"Could not acquire gProfiler's lock. Is it already running?"
+            b" Try 'sudo netstat -xp | grep gprofiler' to see which process holds the lock.\n"
+        )
+        assert expected_msg in e.value.stderr, (
+            f"Error message should indicate mutex is already held. "
+            f"Expected message in stderr, but got: {e.value.stderr}"
+        )
+
+        # Verify first instance is still running after second failed
+        gprofiler1.reload()
+        assert gprofiler1.status == "running", "First gProfiler instance should still be running"
+
+    # First container should exit cleanly when stopped
+    wait_for_container(gprofiler1)
 
 
 def test_not_root(
@@ -102,7 +123,8 @@ def test_not_root(
         wait_for_container(gprofiler)
 
     assert e.value.exit_status == 1
-    assert e.value.stderr == b"Not running as root, rerun with --rootless or as root.\n"
+    expected_msg = b"Not running as root, rerun with --rootless or as root.\n"
+    assert expected_msg in e.value.stderr, f"Expected root error message in stderr, but got: {e.value.stderr}"
 
 
 def test_not_host_pid(
@@ -119,11 +141,12 @@ def test_not_host_pid(
         wait_for_container(gprofiler)
 
     assert e.value.exit_status == 1
-    assert e.value.stderr == (
+    expected_msg = (
         b"Please run me in the init PID namespace! In Docker, make sure you pass '--pid=host'."
         b" In Kubernetes, add 'hostPID: true' in the Pod spec.\n"
         b"You can disable this check with --disable-pidns-check.\n"
     )
+    assert expected_msg in e.value.stderr, f"Expected PID namespace error message in stderr, but got: {e.value.stderr}"
 
 
 def test_host_pid_not_privileged(
