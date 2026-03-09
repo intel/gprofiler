@@ -61,14 +61,10 @@ class SupportedPerfEvent(Enum):
     PERF_DEFAULT = "default"
     PERF_SW_CPU_CLOCK = "cpu-clock"
     PERF_SW_TASK_CLOCK = "task-clock"
-    PERF_CUSTOM_EVENT = "custom"  # User-specified event via --perf-event
 
-    def perf_extra_args(self, custom_event_args: Optional[List[str]] = None) -> List[str]:
+    def perf_extra_args(self) -> List[str]:
         if self == SupportedPerfEvent.PERF_DEFAULT:
             return []
-        elif self == SupportedPerfEvent.PERF_CUSTOM_EVENT:
-            # Custom event args provided externally
-            return custom_event_args if custom_event_args else []
         return ["-e", self.value]
 
 
@@ -208,7 +204,7 @@ def parse_perf_script_from_iterator(
         _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
         sample_count += 1
 
-    logger.info(f"Parsed perf script output: {sample_count} samples")
+    logger.debug(f"Parsed perf script output: {sample_count} samples")
 
     return pid_to_collapsed_stacks_counters
 

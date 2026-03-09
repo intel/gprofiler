@@ -115,7 +115,9 @@ Make sure you are not passing `-s` to the `-ldflags` during your build - `-s` om
 
 gProfiler supports profiling with custom hardware events (PMU events) for generating flamegraphs based on specific hardware performance counters like cache misses, branch mispredictions, etc.
 
-* `--perf-event`: Specify a perf event to use for profiling instead of the default CPU time-based sampling. When this option is used, all language-specific profilers (Java, Python, etc.) are disabled and only `perf` runs.
+* `--perf-event`: Specify a perf event to use for profiling instead of the default CPU time-based sampling.
+    * **Requires `--mode=cpu`** (the default mode). Not supported with `--mode=allocation` or `--mode=none`.
+    * When this option is used, all language-specific profilers (Java, Python, etc.) are disabled and only `perf` runs. This is because language profilers sample based on OS time, while hardware events sample based on event counts - these are fundamentally different sampling bases and cannot be meaningfully combined.
     * Supports built-in perf events (e.g., `cache-misses`, `branch-misses`, `instructions`)
     * Supports hardware cache events (e.g., `L1-dcache-load-misses`, `LLC-load-misses`)
     * Supports custom PMU events via `--hw-events-file`
@@ -144,7 +146,7 @@ sudo ./gprofiler --perf-event cache-misses --perf-event-period 10000 -d 60 -o /t
 sudo ./gprofiler --perf-event my-custom-event --hw-events-file /path/to/hw_events.json -d 60 -o /tmp
 ```
 
-**Note:** On bare metal systems, hardware events use PEBS (Precise Event-Based Sampling) with `:pp` modifier for more accurate attribution. On VMs, a less precise `:p` modifier is used as a fallback.
+**Note:** On bare metal systems, hardware events use PEBS (Precise Event-Based Sampling) with `:ppp` modifier for `cycles`/`instructions`, `:pp` for other hardware events. On VMs, a less precise `:p` modifier is used as PEBS support may be limited. Hypervisor detection is logged at startup.
 
 **Custom Events Template:** A template file for custom PMU events is available at `gprofiler/resources/hw_events_template.json`.
 

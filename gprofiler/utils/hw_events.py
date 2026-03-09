@@ -28,6 +28,9 @@ from gprofiler.utils.perf_process import perf_path
 
 logger = get_logger_adapter(__name__)
 
+# Default event type when perf list doesn't provide a recognized tag
+DEFAULT_TYPE = "UNKNOWN"
+
 
 @lru_cache(maxsize=None)
 def get_perf_available_events() -> Dict[str, str]:
@@ -46,7 +49,7 @@ def get_perf_available_events() -> Dict[str, str]:
             output = raw_output
 
         events: Dict[str, str] = {}
-        current_type = "unknown"
+        current_type = DEFAULT_TYPE
 
         for line in output.splitlines():
             line = line.strip()
@@ -90,10 +93,7 @@ def get_perf_available_events() -> Dict[str, str]:
 
         return events
 
-    except CalledProcessError:
-        # Cannot use logger here as it may be called before state initialization
-        return {}
-    except Exception:
+    except (CalledProcessError, Exception):
         # Cannot use logger here as it may be called before state initialization
         return {}
 
@@ -117,6 +117,9 @@ def load_custom_events(hw_events_file: Optional[str] = None) -> Dict:
         with open(json_path, "r") as f:
             events = json.load(f)
 
+        if not isinstance(events, dict):
+            raise ValueError(f"Hardware events file must contain a JSON object, got {type(events).__name__}")
+
         # Filter out metadata fields (starting with _)
         custom_events = {k: v for k, v in events.items() if not k.startswith("_")}
         return custom_events
@@ -135,10 +138,11 @@ def get_event_type(event_name: str, perf_events: Dict[str, str], hw_events_file:
     if event_name in perf_events:
         return perf_events[event_name]
 
-    # Check if it's a custom event
-    custom_events = load_custom_events(hw_events_file)
-    if event_name in custom_events:
-        return "custom"
+    # Check if it's a custom event (only if hw_events_file is provided)
+    if hw_events_file:
+        custom_events = load_custom_events(hw_events_file)
+        if event_name in custom_events:
+            return "custom"
 
     return None
 
@@ -270,9 +274,7 @@ def test_perf_event_accessible(event_args: List[str]) -> bool:
             suppress_log=True,
         )
         return True
-    except CalledProcessError:
-        return False
-    except Exception:
+    except (CalledProcessError, Exception):
         return False
 
 
