@@ -111,6 +111,45 @@ Make sure you are not passing `-s` to the `-ldflags` during your build - `-s` om
     * `smart` - Run both `fp` and `dwarf`, then choose the result with the highest average of stack frames count, per process.
     * `disabled` - Avoids running `perf` at all. See [perf-less mode](#perf-less-mode).
 
+### Hardware event profiling options
+
+gProfiler supports profiling with custom hardware events (PMU events) for generating flamegraphs based on specific hardware performance counters like cache misses, branch mispredictions, etc.
+
+* `--perf-event`: Specify a perf event to use for profiling instead of the default CPU time-based sampling.
+    * **Requires `--mode=cpu`** (the default mode). Not supported with `--mode=allocation` or `--mode=none`.
+    * When this option is used, all language-specific profilers (Java, Python, etc.) are disabled and only `perf` runs. This is because language profilers sample based on OS time, while hardware events sample based on event counts - these are fundamentally different sampling bases and cannot be meaningfully combined.
+    * Supports built-in perf events (e.g., `cache-misses`, `branch-misses`, `instructions`)
+    * Supports hardware cache events (e.g., `L1-dcache-load-misses`, `LLC-load-misses`)
+    * Supports custom PMU events via `--hw-events-file`
+    * Uncore events (prefix `uncore_`) are not supported as they cannot be attributed to specific processes
+
+* `--perf-event-period`: Use period-based sampling instead of frequency-based sampling. This option specifies the number of events between each sample.
+    * Requires `--perf-event` to be specified
+    * Mutually exclusive with `-f/--profiling-frequency`
+    * Example: `--perf-event-period 10000` samples every 10,000 events
+
+* `--hw-events-file`: Path to a JSON file containing custom PMU event definitions. Use this for events not available in `perf list`. See `gprofiler/resources/hw_events_template.json` for the format.
+
+**Examples:**
+
+```bash
+# Profile using cache-misses event with default frequency (11 Hz)
+sudo ./gprofiler --perf-event cache-misses -d 60 -o /tmp
+
+# Profile using cache-misses event with custom frequency (99 Hz)
+sudo ./gprofiler --perf-event cache-misses -f 99 -d 60 -o /tmp
+
+# Profile using cache-misses event with period-based sampling (every 10,000 cache misses)
+sudo ./gprofiler --perf-event cache-misses --perf-event-period 10000 -d 60 -o /tmp
+
+# Profile using a custom event defined in a JSON file
+sudo ./gprofiler --perf-event my-custom-event --hw-events-file /path/to/hw_events.json -d 60 -o /tmp
+```
+
+**Note:** On bare metal systems, hardware events use PEBS (Precise Event-Based Sampling) with `:ppp` modifier for `cycles`/`instructions`, `:pp` for other hardware events. On VMs, a less precise `:p` modifier is used as PEBS support may be limited. Hypervisor detection is logged at startup.
+
+**Custom Events Template:** A template file for custom PMU events is available at `gprofiler/resources/hw_events_template.json`.
+
 ## Rootless mode
 gProfiler can be run in rootless mode, profiling without root or sudo access with limited functionality by using the `--rootless` argument.
 
