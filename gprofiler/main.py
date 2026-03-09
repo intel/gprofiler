@@ -1064,7 +1064,9 @@ def verify_preconditions(args: configargparse.Namespace, processes_to_profile: O
 
     try:
         if is_linux() and not grab_gprofiler_mutex():
-            sys.exit(0)
+            # Another gProfiler instance is running (or lock is held).
+            # Treat as a precondition failure (exit with error status).
+            sys.exit(1)
     except Exception:
         traceback.print_exc()
         print(
