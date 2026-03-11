@@ -56,6 +56,7 @@ def _make_profile_metadata(
     metadata: ProfileMetadata,
     metrics: Metrics,
     hwmetrics: Optional[HWMetrics],
+    flamegraph_html: Optional[str],
     application_metadata: Optional[List[Optional[Dict]]],
     application_metadata_enabled: bool,
 ) -> str:
@@ -77,6 +78,7 @@ def _make_profile_metadata(
         "profiling_mode": metadata["profiling_mode"],
         "hwmetrics": hwmetrics.metrics_data if hwmetrics is not None else None,
         "htmlblob": hwmetrics.metrics_html if hwmetrics is not None else None,
+        "flamegraph_html": flamegraph_html,
     }
     return "# " + json.dumps(profile_metadata)
 
@@ -209,6 +211,7 @@ def concatenate_profiles(
     metadata: ProfileMetadata,
     metrics: Metrics,
     hwmetrics: Optional[HWMetrics],
+    flamegraph_html: Optional[str] = None,
     external_app_metadata: PidToAppMetadata,
 ) -> str:
     """
@@ -238,6 +241,7 @@ def concatenate_profiles(
             metadata,
             metrics,
             hwmetrics,
+            flamegraph_html,
             application_metadata,
             enrichment_options.application_metadata,
         ),
@@ -254,6 +258,7 @@ def merge_profiles(
     metadata: ProfileMetadata,
     metrics: Metrics,
     hwmetrics: Optional[HWMetrics],
+    flamegraph_html: Optional[str] = None,
     external_app_metadata: PidToAppMetadata,
 ) -> str:
     # merge process profiles into the global perf results.
@@ -306,5 +311,6 @@ def merge_profiles(
         metadata=metadata,
         metrics=metrics,
         hwmetrics=hwmetrics,
+        flamegraph_html=flamegraph_html,
         external_app_metadata=external_app_metadata,
     )
