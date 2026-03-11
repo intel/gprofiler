@@ -44,7 +44,7 @@ class ProfilingCommand:
 class CommandManager:
     """Manager for profiling command queues with priority-based execution"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Command queues
         self.stop_queue: Deque[ProfilingCommand] = deque()  # For stop commands (highest priority)
         self.adhoc_queue: Deque[ProfilingCommand] = deque()  # For single-run commands (continuous=False)
@@ -217,7 +217,7 @@ class CommandManager:
         with self.queue_lock:
             return len(self.stop_queue) > 0 or len(self.adhoc_queue) > 0 or len(self.continuous_queue) > 0
 
-    def clear_queues(self):
+    def clear_queues(self) -> None:
         """Clear all queued commands (used during shutdown)"""
         with self.queue_lock:
             stop_count = len(self.stop_queue)

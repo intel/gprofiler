@@ -18,7 +18,7 @@ import datetime
 import logging
 import socket
 import threading
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, cast
 
 import configargparse
 import requests
@@ -69,7 +69,7 @@ class HeartbeatClient:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
+                return cast(str, s.getsockname()[0])
         except Exception:
             return "127.0.0.1"
 
@@ -94,7 +94,7 @@ class HeartbeatClient:
                 result = response.json()
                 if result.get("success") and result.get("profiling_command"):
                     logger.info(f"Received profiling command from server: {result.get('command_id')}")
-                    return result
+                    return cast(Dict[str, Any], result)
                 logger.debug("Heartbeat successful, no pending commands")
                 return None
             else:
@@ -201,7 +201,7 @@ class DynamicGProfilerManager:
 
                 # Step 3: Process next queued command
                 next_cmd = self.command_manager.get_next_command()
-                if self._should_process(next_cmd):
+                if next_cmd is not None and self._should_process(next_cmd):
                     self._process_command(next_cmd)
 
                 self.stop_event.wait(self.heartbeat_interval)
@@ -267,10 +267,10 @@ class DynamicGProfilerManager:
                 self.continuous.start(cmd.profiling_command, cmd.command_id)
                 started = True
             elif self.continuous.can_be_paused():
-                logger.info(
-                    "Replacing current continuous profiler with command %s", cmd.command_id
-                )
-                self.command_manager.pause_command(self.continuous.command.command_id)
+                continuous_cmd = self.continuous.command
+                if continuous_cmd is not None:
+                    logger.info("Replacing current continuous profiler with command %s", cmd.command_id)
+                    self.command_manager.pause_command(continuous_cmd.command_id)
                 self.continuous.stop()
                 self.continuous.start(cmd.profiling_command, cmd.command_id)
                 started = True
@@ -294,11 +294,13 @@ class DynamicGProfilerManager:
                 started = True
             elif self.continuous.can_be_paused() and not self.adhoc.is_running():
                 # Time-slice path: pause continuous, run ad-hoc, continuous re-queued
-                logger.info(
-                    "Pausing continuous profiler for ad-hoc command %s (overlapping types)",
-                    cmd.command_id,
-                )
-                self.command_manager.pause_command(self.continuous.command.command_id)
+                continuous_cmd = self.continuous.command
+                if continuous_cmd is not None:
+                    logger.info(
+                        "Pausing continuous profiler for ad-hoc command %s (overlapping types)",
+                        cmd.command_id,
+                    )
+                    self.command_manager.pause_command(continuous_cmd.command_id)
                 self.continuous.stop()
                 self.adhoc.start(cmd.profiling_command, cmd.command_id)
                 started = True

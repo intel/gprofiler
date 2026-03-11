@@ -3,11 +3,12 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import configargparse
 
 if TYPE_CHECKING:
+    from gprofiler.dynamic_profiling_management.heartbeat import HeartbeatClient
     from gprofiler.main import GProfiler
 
 from gprofiler.client import ProfilerAPIClient
@@ -210,8 +211,9 @@ def create_gprofiler_instance(args: configargparse.Namespace) -> Optional["GProf
     if hasattr(args, "tool_perfspect_path") and args.tool_perfspect_path:
         perfspect_path = Path(args.tool_perfspect_path)
 
+    output_dir = getattr(args, "output_dir", None) or ""
     return GProfiler(
-        output_dir=getattr(args, "output_dir", None),
+        output_dir=output_dir,
         flamegraph=args.flamegraph,
         rotating_output=getattr(args, "rotating_output", False),
         rootless=getattr(args, "rootless", False),
@@ -249,10 +251,10 @@ class ProfilerSlotBase:
     def __init__(
         self,
         base_args: configargparse.Namespace,
-        heartbeat_client,
+        heartbeat_client: "HeartbeatClient",
         command_manager: "CommandManager",
         stop_event: threading.Event,
-    ):
+    ) -> None:
         self._base_args = base_args
         self._heartbeat_client = heartbeat_client
         self._command_manager = command_manager
@@ -278,7 +280,9 @@ class ProfilerSlotBase:
             except Exception as e:
                 logger.error(f"Error stopping {self.SLOT_NAME} profiler: {e}")
             try:
-                self.gprofiler.maybe_cleanup_subprocesses()
+                cleanup_fn = getattr(self.gprofiler, "maybe_cleanup_subprocesses", None)
+                if cleanup_fn is not None:
+                    cleanup_fn()
             except Exception as e:
                 logger.info(f"{self.SLOT_NAME} cleanup completed with minor errors: {e}")
             self.gprofiler = None
