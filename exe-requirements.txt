@@ -1,2 +1,2 @@
-pyinstaller==6.12.0
+pyinstaller==6.17.0
 staticx @ git+https://github.com/Granulate/staticx.git@33eefdadc72832d5aa67c0792768c9e76afb746d; platform.machine == "x86_64"

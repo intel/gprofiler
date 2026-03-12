@@ -45,6 +45,7 @@ from gprofiler.gprofiler_types import (
     StackToSampleCount,
     integers_list,
     nonnegative_integer,
+    positive_integer,
 )
 from gprofiler.log import get_logger_adapter
 from gprofiler.metadata import application_identifiers
@@ -145,7 +146,9 @@ class PythonMetadata(ApplicationMetadata):
                     pdeathsigger=False,
                 )
 
-            return run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid).stdout.decode().strip()
+            result = cast(CompletedProcess, run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid))
+            version_output: str = result.stdout.decode().strip()
+            return version_output
         except Exception:
             return None
 
@@ -378,6 +381,16 @@ class PySpyProfiler(SpawningProcessProfilerBase):
             " they are not recognized by gProfiler as Python processes."
             " Note - gProfiler assumes that the given processes are kept running as long as gProfiler runs.",
         ),
+        ProfilerArgument(
+            name="--python-skip-pyperf-profiler-above",
+            dest="python_skip_pyperf_profiler_above",
+            type=positive_integer,
+            default=0,
+            help="Skip PyPerf (eBPF Python profiler) when Python processes exceed this threshold (0=unlimited). "
+            "When exceeded, prevents PyPerf from starting but allows py-spy fallback for Python profiling. "
+            "This provides fine-grained control over PyPerf resource usage independent of system profilers. "
+            "Default: %(default)s",
+        ),
     ],
     supported_profiling_modes=["cpu"],
 )
@@ -398,6 +411,7 @@ class PythonProfiler(ProfilerInterface):
         python_pyperf_verbose: bool,
         python_pyspy_process: List[int],
         min_duration: int = 0,
+        python_skip_pyperf_profiler_above: int = 0,
     ):
         if python_mode == "py-spy":
             python_mode = "pyspy"
@@ -422,6 +436,7 @@ class PythonProfiler(ProfilerInterface):
                 python_pyperf_user_stacks_pages,
                 python_pyperf_verbose,
                 min_duration,
+                python_skip_pyperf_profiler_above,
             )
         else:
             self._ebpf_profiler = None
@@ -449,6 +464,7 @@ class PythonProfiler(ProfilerInterface):
             user_stacks_pages: Optional[int],
             verbose: bool,
             min_duration: int,
+            python_skip_pyperf_profiler_above: int,
         ) -> Optional[PythonEbpfProfiler]:
             try:
                 profiler = PythonEbpfProfiler(
@@ -459,6 +475,7 @@ class PythonProfiler(ProfilerInterface):
                     user_stacks_pages=user_stacks_pages,
                     verbose=verbose,
                     min_duration=min_duration,
+                    python_skip_pyperf_profiler_above=python_skip_pyperf_profiler_above,
                 )
                 profiler.test()
                 return profiler
@@ -468,6 +485,18 @@ class PythonProfiler(ProfilerInterface):
                 return None
 
     def start(self) -> None:
+        # Check PyPerf-specific skip logic first
+        if self._ebpf_profiler is not None:
+            if self._ebpf_profiler.should_skip_due_to_python_threshold():
+                # Skip PyPerf but keep py-spy as fallback
+                logger.info("PyPerf skipped due to Python process threshold, falling back to py-spy")
+                self._ebpf_profiler = None
+
+                # Ensure py-spy profiler exists as fallback
+                if self._pyspy_profiler is None:
+                    logger.warning("PyPerf skipped but no py-spy fallback available")
+
+        # Start the appropriate profiler
         if self._ebpf_profiler is not None:
             self._ebpf_profiler.start()
         elif self._pyspy_profiler is not None:
