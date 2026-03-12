@@ -223,13 +223,52 @@ class GProfiler:
         if self._rotating_output and os.path.basename(prev_output) != last_output_name:
             prev_output.unlink(missing_ok=True)
 
+    def _generate_flamegraph_html(
+        self,
+        collapsed_data: str,
+        local_start_time: datetime.datetime,
+        local_end_time: datetime.datetime,
+    ) -> Optional[str]:
+        """Generate flamegraph HTML from collapsed stack data.
+
+        Args:
+            collapsed_data: Collapsed stack data (with metadata stripped)
+            local_start_time: Profile start time
+            local_end_time: Profile end time
+
+        Returns:
+            Flamegraph HTML as a string, or None if generation fails
+        """
+        try:
+            start_ts = get_iso8601_format_time(local_start_time)
+            end_ts = get_iso8601_format_time(local_end_time)
+            flamegraph_html = (
+                Path(resource_path("flamegraph/flamegraph_template.html"))
+                .read_bytes()
+                .replace(
+                    b"{{{JSON_DATA}}}",
+                    run_process(
+                        [resource_path("burn"), "convert", "--type=folded"],
+                        suppress_log=True,
+                        stdin=collapsed_data.encode(),
+                        stop_event=self._profiler_state.stop_event,
+                        timeout=10,
+                    ).stdout,
+                )
+                .replace(b"{{{START_TIME}}}", start_ts.encode())
+                .replace(b"{{{END_TIME}}}", end_ts.encode())
+            )
+            return flamegraph_html.decode("utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to generate flamegraph HTML: {e}")
+            return None
+
     def _generate_output_files(
         self,
         collapsed_data: str,
         local_start_time: datetime.datetime,
         local_end_time: datetime.datetime,
     ) -> None:
-        start_ts = get_iso8601_format_time(local_start_time)
         end_ts = get_iso8601_format_time(local_end_time)
         base_filename = os.path.join(self._output_dir, "profile_{}".format(escape_filename(end_ts)))
         collapsed_path = base_filename + ".col"
@@ -242,28 +281,14 @@ class GProfiler:
 
         if self._flamegraph:
             flamegraph_path = base_filename + ".html"
-            flamegraph_data = (
-                Path(resource_path("flamegraph/flamegraph_template.html"))
-                .read_bytes()
-                .replace(
-                    b"{{{JSON_DATA}}}",
-                    run_process(
-                        [resource_path("burn"), "convert", "--type=folded"],
-                        suppress_log=True,
-                        stdin=stripped_collapsed_data.encode(),
-                        stop_event=self._profiler_state.stop_event,
-                        timeout=10,
-                    ).stdout,
-                )
-                .replace(b"{{{START_TIME}}}", start_ts.encode())
-                .replace(b"{{{END_TIME}}}", end_ts.encode())
-            )
-            Path(flamegraph_path).write_bytes(flamegraph_data)
+            flamegraph_html = self._generate_flamegraph_html(stripped_collapsed_data, local_start_time, local_end_time)
+            if flamegraph_html:
+                Path(flamegraph_path).write_bytes(flamegraph_html.encode("utf-8"))
 
-            # point last_flamegraph.html at the new file; and possibly, delete the previous one.
-            self._update_last_output("last_flamegraph.html", flamegraph_path)
+                # point last_flamegraph.html at the new file; and possibly, delete the previous one.
+                self._update_last_output("last_flamegraph.html", flamegraph_path)
 
-            logger.info(f"Saved flamegraph to {flamegraph_path}")
+                logger.info(f"Saved flamegraph to {flamegraph_path}")
 
     def _strip_extra_data(self, collapsed_data: str) -> str:
         """
@@ -390,6 +415,41 @@ class GProfiler:
             logger.warning("External metadata is stale, ignoring it")
             external_app_metadata = {}
 
+        # Generate flamegraph HTML if flamegraph is enabled
+        flamegraph_html = None
+        if self._flamegraph:
+            # Create a temporary merged result to generate flamegraph from
+            # Use the same logic as merged_result to ensure consistency
+            if NoopProfiler.is_noop_profiler(self.system_profiler):
+                temp_merged = concatenate_profiles(
+                    process_profiles=process_profiles,
+                    container_names_client=self._profiler_state.container_names_client,
+                    enrichment_options=self._enrichment_options,
+                    metadata=metadata,
+                    metrics=metrics,
+                    hwmetrics=hwmetrics,
+                    external_app_metadata=external_app_metadata,
+                )
+            else:
+                temp_merged = merge_profiles(
+                    perf_pid_to_profiles=system_result,
+                    process_profiles=process_profiles,
+                    container_names_client=self._profiler_state.container_names_client,
+                    enrichment_options=self._enrichment_options,
+                    metadata=metadata,
+                    metrics=metrics,
+                    hwmetrics=hwmetrics,
+                    external_app_metadata=external_app_metadata,
+                )
+
+            # Strip metadata to get just the stacks
+            stripped_collapsed_data = self._strip_extra_data(temp_merged)
+
+            # Generate flamegraph HTML using the extracted method
+            flamegraph_html = self._generate_flamegraph_html(stripped_collapsed_data, local_start_time, local_end_time)
+            if flamegraph_html:
+                logger.info("Generated flamegraph HTML for profile data")
+
         if NoopProfiler.is_noop_profiler(self.system_profiler):
             assert system_result == {}, system_result  # should be empty!
             merged_result = concatenate_profiles(
@@ -399,6 +459,7 @@ class GProfiler:
                 metadata=metadata,
                 metrics=metrics,
                 hwmetrics=hwmetrics,
+                flamegraph_html=flamegraph_html,
                 external_app_metadata=external_app_metadata,
             )
 
@@ -411,6 +472,7 @@ class GProfiler:
                 metadata=metadata,
                 metrics=metrics,
                 hwmetrics=hwmetrics,
+                flamegraph_html=flamegraph_html,
                 external_app_metadata=external_app_metadata,
             )
 
