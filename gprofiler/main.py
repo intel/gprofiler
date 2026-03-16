@@ -423,7 +423,7 @@ class GProfiler:
             if NoopProfiler.is_noop_profiler(self.system_profiler):
                 temp_merged = concatenate_profiles(
                     process_profiles=process_profiles,
-                    container_names_client=self._profiler_state.container_names_client,
+                    container_names_client=None,
                     enrichment_options=self._enrichment_options,
                     metadata=metadata,
                     metrics=metrics,
@@ -434,7 +434,7 @@ class GProfiler:
                 temp_merged = merge_profiles(
                     perf_pid_to_profiles=system_result,
                     process_profiles=process_profiles,
-                    container_names_client=self._profiler_state.container_names_client,
+                    container_names_client=None,
                     enrichment_options=self._enrichment_options,
                     metadata=metadata,
                     metrics=metrics,
