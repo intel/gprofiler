@@ -17,7 +17,7 @@ This document describes the implementation of a centralized profiling control sy
 
 1. **Performance Studio Backend** - Central control server that:
    - Receives profiling requests via REST API
-   - Manages profiling commands for hosts/services  
+   - Manages profiling commands for hosts/services
    - Responds to agent heartbeats with pending commands
    - Tracks command execution status
 
@@ -38,7 +38,7 @@ This document describes the implementation of a centralized profiling control sy
 - **Command completion tracking**
 - **PerfSpect integration** for hardware metrics collection
 
-### ✅ Agent Features  
+### ✅ Agent Features
 - **Heartbeat communication** with configurable intervals
 - **Dynamic profiling** based on server commands
 - **Command-driven execution** (start/stop profiling)
@@ -108,8 +108,8 @@ POST /api/metrics/heartbeat
 "pod" -> "host" Table -> {pod_name, array_of_hosts}
 "namespace" -> "host" Table -> {namespace, array_of_hosts}
 
-1. add k8s namespace hierarchy info as part of heartbeat 
-2. save k8s information in hostheartbeats table and create de-normalized table for containersToHosts, podsToHost and namespaceToHosts, 
+1. add k8s namespace hierarchy info as part of heartbeat
+2. save k8s information in hostheartbeats table and create de-normalized table for containersToHosts, podsToHost and namespaceToHosts,
 3. perform profiling : support profiling request by namespaces, pods and containers ( 5 )
 4. test e2e ( 3 )
 ```
@@ -125,7 +125,7 @@ POST /api/metrics/heartbeat
       "duration": 60,
       "frequency": 11,
       "profiling_mode": "cpu",
-      "pids": "" 
+      "pids": ""
     }
   },
   "command_id": "cmd-uuid"
@@ -142,7 +142,7 @@ POST /api/metrics/command_completion
 ```json
 {
   "command_id": "cmd-uuid",
-  "hostname": "worker-01", 
+  "hostname": "worker-01",
   "status": "completed",  // "completed" or "failed"
   "execution_time": 65,
   "error_message": null,
@@ -172,7 +172,7 @@ When the agent receives a heartbeat response with `enable_perfspect: true` in th
 # Agent processes the configuration
 if combined_config.get("enable_perfspect", False):
     new_args.collect_hw_metrics = True
-    
+
     # Auto-install PerfSpect
     from gprofiler.perfspect_installer import get_or_install_perfspect
     perfspect_path = get_or_install_perfspect()
@@ -302,7 +302,7 @@ curl -X POST http://localhost:8000/api/metrics/profile_request \
 curl -X POST http://localhost:8000/api/metrics/profile_request \
   -H "Content-Type: application/json" \
   -d '{
-    "service_name": "web-service", 
+    "service_name": "web-service",
     "command_type": "stop",
     "stop_level": "host",
     "target_hostnames": ["web-01"]
@@ -328,7 +328,7 @@ python gprofiler/main.py \
 ```bash
 # Set environment variables first
 export GPROFILER_TOKEN="my_token"
-export GPROFILER_SERVICE="your-service-name"  
+export GPROFILER_SERVICE="your-service-name"
 export GPROFILER_SERVER="http://localhost:8080"
 
 # Production command (can also source /opt/gprofiler/envs.sh for variables)
@@ -352,7 +352,7 @@ export GPROFILER_SERVER="http://localhost:8080"
 
 1. **Command Generation**: Each profiling request generates a unique `command_id`
 2. **Command Merging**: Multiple requests for the same host are merged into single commands
-3. **Stop Handling**: 
+3. **Stop Handling**:
    - Process-level stops remove specific PIDs from commands
    - Host-level stops terminate all profiling for the host
 4. **Heartbeat Response**: Returns pending commands with `command_type` and configuration
@@ -471,7 +471,7 @@ When a new start command arrives while a **continuous** profiler is running and 
 
 1. Start Performance Studio backend
 2. Run test agent: `python run_heartbeat_agent.py`
-3. Submit test commands: `python test_heartbeat_system.py`  
+3. Submit test commands: `python test_heartbeat_system.py`
 4. Verify agent receives and executes commands
 5. Check idempotency and error handling
 
@@ -483,7 +483,7 @@ When a new start command arrives while a **continuous** profiler is running and 
 - Returns appropriate HTTP status codes
 - Logs all operations for debugging
 
-### Agent  
+### Agent
 - Retries failed heartbeats with backoff
 - Continues heartbeat loop on command execution errors
 - Persists executed command IDs across restarts
@@ -500,7 +500,7 @@ When a new start command arrives while a **continuous** profiler is running and 
 ## Future Enhancements
 
 - **Real-time Status**: WebSocket connection for real-time agent status
-- **Command Scheduling**: Schedule profiling commands for future execution  
+- **Command Scheduling**: Schedule profiling commands for future execution
 - **Resource Monitoring**: Check system resources before starting profiling
 - **Multi-tenant Support**: Isolation between different services/teams
 - **Distributed Coordination**: Coordinate profiling across multiple agents
@@ -659,7 +659,7 @@ sudo ./build/x86_64/gprofiler \
 ```bash
 -u, --upload-results              # Upload results to Performance Studio
 --token=$GPROFILER_TOKEN          # Authentication token
---service-name=$GPROFILER_SERVICE # Service identifier  
+--service-name=$GPROFILER_SERVICE # Service identifier
 --server-host $GPROFILER_SERVER   # Performance Studio backend URL
 --dont-send-logs                  # Disable log transmission
 --server-upload-timeout 10        # Upload timeout (seconds)
