@@ -111,6 +111,8 @@ def profiler_state(tmp_path: Path, insert_dso_name: bool) -> ProfilerState:
         container_names_client=ContainerNamesClient(),
         processes_to_profile=None,
         storage_dir=str(tmp_path),
+        max_processes_per_profiler=0,
+        max_system_processes_for_system_profilers=0,
     )
 
 

@@ -33,7 +33,7 @@ import humanfriendly
 from granulate_utils.linux.ns import is_root, is_running_in_init_pid
 from granulate_utils.linux.process import is_process_running
 from granulate_utils.metadata.cloud import get_aws_execution_env
-from psutil import NoSuchProcess, Process
+from psutil import NoSuchProcess, Process, process_iter
 from requests import RequestException, Timeout
 
 from gprofiler import __version__
@@ -46,6 +46,7 @@ from gprofiler.client import (
 from gprofiler.consts import CPU_PROFILING_MODE
 from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.diagnostics import log_diagnostics, set_diagnostics
+from gprofiler.dynamic_profiling_management.heartbeat import DynamicGProfilerManager, HeartbeatClient
 from gprofiler.exceptions import APIError, NoProfilersEnabledError
 from gprofiler.gprofiler_types import ProcessToProfileData, UserArgs, integers_list, positive_integer
 from gprofiler.hw_metrics import HWMetricsMonitor, HWMetricsMonitorBase, NoopHWMetricsMonitor
@@ -167,6 +168,10 @@ class GProfiler:
             profiling_mode=profiling_mode,
             container_names_client=container_names_client,
             processes_to_profile=processes_to_profile,
+            max_processes_per_profiler=int(user_args.get("max_processes_per_profiler", 0) or 0),
+            max_system_processes_for_system_profilers=int(
+                user_args.get("max_system_processes_for_system_profilers", 0) or 0
+            ),
         )
         self.system_profiler, self.process_profilers = get_profilers(user_args, profiler_state=self._profiler_state)
         self._usage_logger = usage_logger
@@ -218,13 +223,52 @@ class GProfiler:
         if self._rotating_output and os.path.basename(prev_output) != last_output_name:
             prev_output.unlink(missing_ok=True)
 
+    def _generate_flamegraph_html(
+        self,
+        collapsed_data: str,
+        local_start_time: datetime.datetime,
+        local_end_time: datetime.datetime,
+    ) -> Optional[str]:
+        """Generate flamegraph HTML from collapsed stack data.
+
+        Args:
+            collapsed_data: Collapsed stack data (with metadata stripped)
+            local_start_time: Profile start time
+            local_end_time: Profile end time
+
+        Returns:
+            Flamegraph HTML as a string, or None if generation fails
+        """
+        try:
+            start_ts = get_iso8601_format_time(local_start_time)
+            end_ts = get_iso8601_format_time(local_end_time)
+            flamegraph_html = (
+                Path(resource_path("flamegraph/flamegraph_template.html"))
+                .read_bytes()
+                .replace(
+                    b"{{{JSON_DATA}}}",
+                    run_process(
+                        [resource_path("burn"), "convert", "--type=folded"],
+                        suppress_log=True,
+                        stdin=collapsed_data.encode(),
+                        stop_event=self._profiler_state.stop_event,
+                        timeout=10,
+                    ).stdout,
+                )
+                .replace(b"{{{START_TIME}}}", start_ts.encode())
+                .replace(b"{{{END_TIME}}}", end_ts.encode())
+            )
+            return flamegraph_html.decode("utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to generate flamegraph HTML: {e}")
+            return None
+
     def _generate_output_files(
         self,
         collapsed_data: str,
         local_start_time: datetime.datetime,
         local_end_time: datetime.datetime,
     ) -> None:
-        start_ts = get_iso8601_format_time(local_start_time)
         end_ts = get_iso8601_format_time(local_end_time)
         base_filename = os.path.join(self._output_dir, "profile_{}".format(escape_filename(end_ts)))
         collapsed_path = base_filename + ".col"
@@ -237,28 +281,14 @@ class GProfiler:
 
         if self._flamegraph:
             flamegraph_path = base_filename + ".html"
-            flamegraph_data = (
-                Path(resource_path("flamegraph/flamegraph_template.html"))
-                .read_bytes()
-                .replace(
-                    b"{{{JSON_DATA}}}",
-                    run_process(
-                        [resource_path("burn"), "convert", "--type=folded"],
-                        suppress_log=True,
-                        stdin=stripped_collapsed_data.encode(),
-                        stop_event=self._profiler_state.stop_event,
-                        timeout=10,
-                    ).stdout,
-                )
-                .replace(b"{{{START_TIME}}}", start_ts.encode())
-                .replace(b"{{{END_TIME}}}", end_ts.encode())
-            )
-            Path(flamegraph_path).write_bytes(flamegraph_data)
+            flamegraph_html = self._generate_flamegraph_html(stripped_collapsed_data, local_start_time, local_end_time)
+            if flamegraph_html:
+                Path(flamegraph_path).write_bytes(flamegraph_html.encode("utf-8"))
 
-            # point last_flamegraph.html at the new file; and possibly, delete the previous one.
-            self._update_last_output("last_flamegraph.html", flamegraph_path)
+                # point last_flamegraph.html at the new file; and possibly, delete the previous one.
+                self._update_last_output("last_flamegraph.html", flamegraph_path)
 
-            logger.info(f"Saved flamegraph to {flamegraph_path}")
+                logger.info(f"Saved flamegraph to {flamegraph_path}")
 
     def _strip_extra_data(self, collapsed_data: str) -> str:
         """
@@ -279,8 +309,37 @@ class GProfiler:
         self._system_metrics_monitor.start()
         self._hw_metrics_monitor.start()
 
+        # Check if system should skip continuous profilers due to process count
+        skip_system_profilers = False
+        if self._profiler_state.max_system_processes_for_system_profilers > 0:
+            try:
+                total_processes = len(list(process_iter()))
+                if total_processes > self._profiler_state.max_system_processes_for_system_profilers:
+                    skip_system_profilers = True
+                    logger.warning(
+                        f"Skipping system profilers (perf) - {total_processes} processes exceed threshold "
+                        f"of {self._profiler_state.max_system_processes_for_system_profilers}. "
+                        f"Runtime profilers (py-spy, Java, etc.) will continue normally."
+                    )
+                else:
+                    logger.debug(
+                        f"System process count: {total_processes} "
+                        f"(threshold: {self._profiler_state.max_system_processes_for_system_profilers})"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not count system processes, continuing with all profilers: {e}")
+
         for prof in list(self.all_profilers):
             try:
+                # Skip system profilers if threshold exceeded
+                if (
+                    skip_system_profilers
+                    and hasattr(prof, "_is_system_wide_profiler")
+                    and prof._is_system_wide_profiler()
+                ):
+                    logger.info(f"Skipping {prof.__class__.__name__} due to high system process count")
+                    continue
+
                 prof.start()
             except Exception:
                 # the SystemProfiler is handled separately - let the user run with '--perf-mode none' if they
@@ -356,6 +415,41 @@ class GProfiler:
             logger.warning("External metadata is stale, ignoring it")
             external_app_metadata = {}
 
+        # Generate flamegraph HTML if flamegraph is enabled
+        flamegraph_html = None
+        if self._flamegraph:
+            # Create a temporary merged result to generate flamegraph from
+            # Use the same logic as merged_result to ensure consistency
+            if NoopProfiler.is_noop_profiler(self.system_profiler):
+                temp_merged = concatenate_profiles(
+                    process_profiles=process_profiles,
+                    container_names_client=None,
+                    enrichment_options=self._enrichment_options,
+                    metadata=metadata,
+                    metrics=metrics,
+                    hwmetrics=hwmetrics,
+                    external_app_metadata=external_app_metadata,
+                )
+            else:
+                temp_merged = merge_profiles(
+                    perf_pid_to_profiles=system_result,
+                    process_profiles=process_profiles,
+                    container_names_client=None,
+                    enrichment_options=self._enrichment_options,
+                    metadata=metadata,
+                    metrics=metrics,
+                    hwmetrics=hwmetrics,
+                    external_app_metadata=external_app_metadata,
+                )
+
+            # Strip metadata to get just the stacks
+            stripped_collapsed_data = self._strip_extra_data(temp_merged)
+
+            # Generate flamegraph HTML using the extracted method
+            flamegraph_html = self._generate_flamegraph_html(stripped_collapsed_data, local_start_time, local_end_time)
+            if flamegraph_html:
+                logger.info("Generated flamegraph HTML for profile data")
+
         if NoopProfiler.is_noop_profiler(self.system_profiler):
             assert system_result == {}, system_result  # should be empty!
             merged_result = concatenate_profiles(
@@ -365,6 +459,7 @@ class GProfiler:
                 metadata=metadata,
                 metrics=metrics,
                 hwmetrics=hwmetrics,
+                flamegraph_html=flamegraph_html,
                 external_app_metadata=external_app_metadata,
             )
 
@@ -377,6 +472,7 @@ class GProfiler:
                 metadata=metadata,
                 metrics=metrics,
                 hwmetrics=hwmetrics,
+                flamegraph_html=flamegraph_html,
                 external_app_metadata=external_app_metadata,
             )
 
@@ -593,6 +689,25 @@ def parse_cmd_args() -> configargparse.Namespace:
         type=integers_list,
         help="Comma separated list of processes that will be filtered to profile,"
         " given multiple times will append pids to one list",
+    )
+    parser.add_argument(
+        "--max-processes-runtime-profiler",
+        dest="max_processes_per_profiler",
+        type=positive_integer,
+        default=0,
+        help="Maximum number of processes to profile per runtime profiler (0=unlimited). "
+        "When exceeded, profiles only the top N processes by CPU usage. "
+        "Does not affect system-wide profilers (perf, eBPF). Default: %(default)s",
+    )
+    parser.add_argument(
+        "--skip-system-profilers-above",
+        dest="max_system_processes_for_system_profilers",
+        type=positive_integer,
+        default=0,
+        help="Skip system-wide profilers (perf only) when total system processes exceed this threshold (0=unlimited). "
+        "When exceeded, prevents perf profiler from starting to reduce resource usage on busy systems. "
+        "PyPerf has its own threshold via --python-skip-pyperf-profiler-above. "
+        "Runtime profilers (py-spy, Java, etc.) continue normally with --max-processes limiting. Default: %(default)s",
     )
     parser.add_argument(
         "--rootless",
@@ -861,6 +976,22 @@ def parse_cmd_args() -> configargparse.Namespace:
         "The file modification indicates the last snapshot time.",
     )
 
+    parser.add_argument(
+        "--enable-heartbeat-server",
+        action="store_true",
+        dest="enable_heartbeat_server",
+        default=False,
+        help="Enable heartbeat communication with server for dynamic profiling commands",
+    )
+
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=positive_integer,
+        dest="heartbeat_interval",
+        default=30,
+        help="Interval in seconds for sending heartbeats to server (default: %(default)s)",
+    )
+
     if is_linux() and not is_aarch64():
         hw_metrics_options = parser.add_argument_group("hardware metrics")
         hw_metrics_options.add_argument(
@@ -935,6 +1066,14 @@ def parse_cmd_args() -> configargparse.Namespace:
 
     if args.profile_spawned_processes and args.pids_to_profile is not None:
         parser.error("--pids is not allowed when profiling spawned processes")
+
+    if args.enable_heartbeat_server:
+        if not args.upload_results:
+            parser.error("--enable-heartbeat-server requires --upload-results to be enabled")
+        if not args.server_token:
+            parser.error("--enable-heartbeat-server requires --token to be provided")
+        if not args.service_name:
+            parser.error("--enable-heartbeat-server requires --service-name to be provided")
 
     return args
 
@@ -1217,37 +1356,60 @@ def main() -> None:
 
         ApplicationIdentifiers.init(enrichment_options)
         set_diagnostics(args.diagnostics)
-        gprofiler = GProfiler(
-            output_dir=args.output_dir,
-            flamegraph=args.flamegraph,
-            rotating_output=args.rotating_output,
-            rootless=args.rootless,
-            profiler_api_client=profiler_api_client,
-            collect_metrics=args.collect_metrics,
-            collect_metadata=args.collect_metadata,
-            enrichment_options=enrichment_options,
-            state=state,
-            usage_logger=usage_logger,
-            user_args=args.__dict__,
-            duration=args.duration,
-            profile_api_version=args.profile_api_version,
-            profiling_mode=args.profiling_mode,
-            collect_hw_metrics=getattr(args, "collect_hw_metrics", False),
-            profile_spawned_processes=args.profile_spawned_processes,
-            remote_logs_handler=remote_logs_handler,
-            controller_process=controller_process,
-            processes_to_profile=processes_to_profile,
-            external_metadata_path=external_metadata_path,
-            heartbeat_file_path=heartbeat_file_path,
-            perfspect_path=perfspect_path,
-            perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
-            verbose=args.verbose,
-        )
-        logger.info("gProfiler initialized and ready to start profiling")
-        if args.continuous:
-            gprofiler.run_continuous()
+
+        # Check if heartbeat server mode is enabled FIRST
+        if args.enable_heartbeat_server:
+            # Create heartbeat client
+            heartbeat_client = HeartbeatClient(
+                api_server=args.api_server,
+                service_name=args.service_name,
+                server_token=args.server_token,
+            )
+
+            # Create dynamic profiler manager
+            manager = DynamicGProfilerManager(args, heartbeat_client)
+            manager.heartbeat_interval = args.heartbeat_interval
+
+            try:
+                logger.info("Starting heartbeat mode - waiting for server commands...")
+                manager.start_heartbeat_loop()
+            except KeyboardInterrupt:
+                logger.info("Received interrupt signal, stopping heartbeat mode...")
+            finally:
+                manager.stop()
         else:
-            gprofiler.run_single()
+            # Normal profiling mode
+            gprofiler = GProfiler(
+                output_dir=args.output_dir,
+                flamegraph=args.flamegraph,
+                rotating_output=args.rotating_output,
+                rootless=args.rootless,
+                profiler_api_client=profiler_api_client,
+                collect_metrics=args.collect_metrics,
+                collect_metadata=args.collect_metadata,
+                enrichment_options=enrichment_options,
+                state=state,
+                usage_logger=usage_logger,
+                user_args=args.__dict__,
+                duration=args.duration,
+                profile_api_version=args.profile_api_version,
+                profiling_mode=args.profiling_mode,
+                collect_hw_metrics=getattr(args, "collect_hw_metrics", False),
+                profile_spawned_processes=args.profile_spawned_processes,
+                remote_logs_handler=remote_logs_handler,
+                controller_process=controller_process,
+                processes_to_profile=processes_to_profile,
+                external_metadata_path=external_metadata_path,
+                heartbeat_file_path=heartbeat_file_path,
+                perfspect_path=perfspect_path,
+                perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
+                verbose=args.verbose,
+            )
+            logger.info("gProfiler initialized and ready to start profiling")
+            if args.continuous:
+                gprofiler.run_continuous()
+            else:
+                gprofiler.run_single()
 
     except KeyboardInterrupt:
         pass
