@@ -44,10 +44,12 @@ class HeartbeatClient:
         api_server: str,
         service_name: str,
         server_token: str,
+        verify: bool = True,
     ):
         self.api_server = api_server.rstrip("/")
         self.service_name = service_name
         self.server_token = server_token
+        self.verify = verify
         self.hostname = get_hostname()
         self.ip_address = self._get_local_ip()
         self.last_command_id: Optional[str] = None
@@ -88,7 +90,7 @@ class HeartbeatClient:
                 "executed_command_ids": list(self.executed_command_ids),
             }
             url = f"{self.api_server}/api/metrics/heartbeat"
-            response = self.session.post(url, json=heartbeat_data, timeout=30)
+            response = self.session.post(url, json=heartbeat_data, timeout=30, verify=self.verify)
 
             if response.status_code == 200:
                 result = response.json()
@@ -122,7 +124,7 @@ class HeartbeatClient:
                 "results_path": results_path,
             }
             url = f"{self.api_server}/api/metrics/command_completion"
-            response = self.session.post(url, json=completion_data, timeout=30)
+            response = self.session.post(url, json=completion_data, timeout=30, verify=self.verify)
             if response.status_code == 200:
                 logger.info(f"Reported command completion for {command_id} (status={status})")
                 return True
