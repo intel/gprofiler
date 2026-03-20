@@ -350,7 +350,6 @@ jobs:
       run: NO_APT_INSTALL=1 ./tests/test.sh --ignore=tests/test_executable.py
 
   build-container-aarch64:
-    if: startsWith(github.ref, 'refs/tags/')
     needs: build-executable-aarch64
     runs-on: ubuntu-22.04-arm
     steps:
@@ -365,13 +364,8 @@ jobs:
 
       # this gets GH_REPO and RELEASE_VERSION
       - name: Get and verify tag value
+        if: startsWith(github.ref, 'refs/tags/')
         run: ./scripts/verify_tag.sh
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -389,7 +383,15 @@ jobs:
           name: gprofiler_aarch64
           path: output/
 
+      - name: Login to DockerHub
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Build and push
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -x
 
@@ -400,6 +402,20 @@ jobs:
           # build & push Aarch64
           # --skip-exe-build needs to be first!
           ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
+
+      - name: Build only (PR)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          set -x
+
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          # build only, no push
+          # --skip-exe-build needs to be first!
+          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t gprofiler_aarch64 --load \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
@@ -430,14 +446,14 @@ jobs:
           name: gprofiler_x86_64.img
           path: output/
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to DockerHub
         uses: docker/login-action@v1
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Push manifest
         run: |
