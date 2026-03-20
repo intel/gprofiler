@@ -1,7 +1,7 @@
 pytest==8.3.5
 pytest-rerunfailures==15.0
 flake8==7.2.0
-black==25.1.0
+black==26.3.1
 mypy==1.15.0
 isort==6.0.1
 PyYAML==6.0.2

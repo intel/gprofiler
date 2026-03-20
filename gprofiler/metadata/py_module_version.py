@@ -18,6 +18,7 @@
 Some of the functions in this module are implemented based on similar functions
 in pip 21.3.1, as mentioned in the functions' documentation.
 """
+
 import csv
 import email.parser
 import functools

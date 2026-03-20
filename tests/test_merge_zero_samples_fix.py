@@ -6,6 +6,7 @@ where perf returns 0 samples but runtime profilers have valid samples.
 This addresses the issue: "However, this cause perf returning 0 samples and will break
 run time profilers during merge logic. So we also need to fix the merge logic."
 """
+
 from __future__ import annotations
 
 import unittest
