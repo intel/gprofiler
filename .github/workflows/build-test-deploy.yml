@@ -383,13 +383,7 @@ jobs:
           name: gprofiler_aarch64
           path: output/
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push
+      - name: Build
         run: |
           set -x
 
@@ -397,12 +391,25 @@ jobs:
           AARCH64_IMAGE="$BASE_IMAGE-aarch64"
           REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
 
-          # build & push Aarch64
+          # build Aarch64 (no push yet, to avoid Docker Hub token scope issues)
           # --skip-exe-build needs to be first!
-          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --push \
+          ./scripts/build_aarch64_container.sh --skip-exe-build --provenance=false --build-arg EXE_PATH=output/gprofiler_aarch64 -t "$AARCH64_IMAGE" --load \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --cache-from type=registry,ref=ghcr.io/${REPO_LOWER}/gprofiler-python-base:latest
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push
+        run: |
+          set -x
+          BASE_IMAGE="${{ env.GH_REPO }}:${{ env.RELEASE_VERSION }}"
+          AARCH64_IMAGE="$BASE_IMAGE-aarch64"
+          docker push "$AARCH64_IMAGE"
 
   deploy-container:
     if: startsWith(github.ref, 'refs/tags/')
