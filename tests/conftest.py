@@ -149,9 +149,11 @@ def dotnet_command_line(path: Path) -> List[str]:
     class_path = path / "dotnet" / "Fibonacci"
     class_path.mkdir(parents=True)
     make_path_world_accessible(class_path)
-    subprocess.run(["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), class_path])
-    subprocess.run(["dotnet", "new", "console", "--force"], cwd=class_path)
-    subprocess.run(["rm", "Program.cs"], cwd=class_path)
+    # Create console project first
+    subprocess.run(["dotnet", "new", "console", "--force"], cwd=class_path, check=True)
+    # Replace Program.cs with Fibonacci.cs (using same name to match .csproj expectations)
+    subprocess.run(["rm", "Program.cs"], cwd=class_path, check=True)
+    subprocess.run(["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Program.cs")], check=True)
     subprocess.run(
         [
             "dotnet",
@@ -164,6 +166,7 @@ def dotnet_command_line(path: Path) -> List[str]:
             "-p:UseSharedCompilation=false",
         ],
         cwd=class_path,
+        check=True,
     )
     return ["dotnet", str(class_path / "Fibonacci.dll"), "--project", str(class_path)]
 
