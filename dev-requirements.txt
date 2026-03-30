@@ -6,7 +6,7 @@ mypy==1.15.0
 isort==6.0.1
 PyYAML==6.0.2
 docker==7.1.0
-types-requests~=2.32.0
+types-requests~=2.33.0
 types-psutil~=7.0.0
 types-PyYAML~=6.0.12
 types-protobuf~=5.29.1
