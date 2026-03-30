@@ -153,7 +153,9 @@ def dotnet_command_line(path: Path) -> List[str]:
     subprocess.run(["dotnet", "new", "console", "--force"], cwd=class_path, check=True)
     # Replace Program.cs with Fibonacci.cs (using same name to match .csproj expectations)
     subprocess.run(["rm", "Program.cs"], cwd=class_path, check=True)
-    subprocess.run(["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Program.cs")], check=True)
+    subprocess.run(
+        ["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Program.cs")], check=True
+    )
     subprocess.run(
         [
             "dotnet",
