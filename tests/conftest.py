@@ -149,13 +149,25 @@ def dotnet_command_line(path: Path) -> List[str]:
     class_path = path / "dotnet" / "Fibonacci"
     class_path.mkdir(parents=True)
     make_path_world_accessible(class_path)
-    # Create console project with explicit Main method (not top-level statements)
-    subprocess.run(["dotnet", "new", "console", "--use-program-main", "--force"], cwd=class_path, check=True)
-    # Replace Program.cs with Fibonacci.cs (using same name to match .csproj expectations)
-    subprocess.run(["rm", "Program.cs"], cwd=class_path, check=True)
+
+    # Copy the Fibonacci.cs source file
     subprocess.run(
-        ["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Program.cs")], check=True
+        ["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Fibonacci.cs")], check=True
     )
+
+    # Create a minimal .csproj file that references Fibonacci.cs
+    csproj_content = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Fibonacci.cs" />
+  </ItemGroup>
+</Project>
+"""
+    (class_path / "Fibonacci.csproj").write_text(csproj_content)
+
     subprocess.run(
         [
             "dotnet",
