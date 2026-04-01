@@ -136,6 +136,7 @@ def start_process(
         **kwargs,
     )
 
+    _processes.append(process)
     return process
 
 
@@ -190,10 +191,28 @@ def reap_process(process: Popen) -> Tuple[int, bytes, bytes]:
     (see https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait, and see
     ticket https://github.com/intel/gprofiler/issues/744).
     """
-    stdout, stderr = process.communicate()
-    returncode = process.poll()
-    assert returncode is not None  # only None if child has not terminated
-    return returncode, stdout, stderr
+    # If process is already terminated, don't try to communicate
+    if process.poll() is not None:
+        # Process already exited, just collect any remaining output
+        try:
+            stdout = process.stdout.read() if process.stdout and not process.stdout.closed else b""
+            stderr = process.stderr.read() if process.stderr and not process.stderr.closed else b""
+        except Exception:
+            stdout, stderr = b"", b""
+        return process.returncode, stdout, stderr
+
+    # Process still running, try normal communicate
+    try:
+        stdout, stderr = process.communicate()
+        return process.returncode, stdout, stderr
+    except ValueError as e:
+        if "flush of closed file" in str(e):
+            # Handle the race condition gracefully
+            returncode = process.wait()
+            stdout, stderr = b"", b""
+            return returncode, stdout, stderr
+        else:
+            raise
 
 
 def _kill_and_reap_process(process: Popen, kill_signal: signal.Signals) -> Tuple[int, bytes, bytes]:
