@@ -80,6 +80,20 @@ def _make_profile_metadata(
         "htmlblob": hwmetrics.metrics_html if hwmetrics is not None else None,
         "flamegraph_html": flamegraph_html,
     }
+
+    # Add sampling event information if present in metadata
+    if "sampling_event" in metadata:
+        profile_metadata["sampling_event"] = metadata["sampling_event"]
+        profile_metadata["sampling_mode"] = metadata.get("sampling_mode", "frequency")
+
+        if metadata.get("sampling_mode") == "period":
+            profile_metadata["sampling_period"] = metadata.get("sampling_period")
+        else:
+            profile_metadata["sampling_frequency"] = metadata.get("sampling_frequency")
+
+        if "precise_modifier" in metadata:
+            profile_metadata["precise_modifier"] = metadata["precise_modifier"]
+
     return "# " + json.dumps(profile_metadata)
 
 

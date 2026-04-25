@@ -180,6 +180,9 @@ class SystemProfiler(ProfilerBase):
         perf_max_cgroups: int = 50,
         perf_max_docker_containers: int = 0,
         min_duration: int = 0,
+        custom_event_name: Optional[str] = None,
+        custom_event_args: Optional[List[str]] = None,
+        perf_period: Optional[int] = None,
     ):
         super().__init__(frequency, duration, profiler_state, min_duration)
         self._perfs: List[PerfProcess] = []
@@ -196,20 +199,35 @@ class SystemProfiler(ProfilerBase):
         self._perf_use_cgroups = perf_use_cgroups
         self._perf_max_cgroups = perf_max_cgroups
         self._perf_max_docker_containers = perf_max_docker_containers
+        self._custom_event_name = custom_event_name
+        self._custom_event_args = custom_event_args
+        self._perf_period = perf_period
+        self._frequency = frequency
         switch_timeout_s = duration * 3  # allow gprofiler to be delayed up to 3 intervals before timing out.
         extra_args = []
-        try:
-            # We want to be certain that `perf record` will collect samples.
-            discovered_perf_event = discover_appropriate_perf_event(
-                Path(self._profiler_state.storage_dir),
-                self._profiler_state.stop_event,
-                self._profiler_state.processes_to_profile,
-            )
-            logger.debug("Discovered perf event", discovered_perf_event=discovered_perf_event.name)
-            extra_args.extend(discovered_perf_event.perf_extra_args())
-        except PerfNoSupportedEvent:
-            logger.critical("Failed to determine perf event to use")
-            raise
+
+        # When custom event is specified, use it directly and skip discovery
+        if custom_event_name and custom_event_args:
+            logger.info(f"Using custom perf event: {custom_event_name}")
+            extra_args.extend(custom_event_args)
+            # Force FP mode for custom events (no DWARF/smart)
+            perf_mode = "fp"
+        else:
+            try:
+                # We want to be certain that `perf record` will collect samples.
+                discovered_perf_event = discover_appropriate_perf_event(
+                    Path(self._profiler_state.storage_dir),
+                    self._profiler_state.stop_event,
+                    self._profiler_state.processes_to_profile,
+                )
+                logger.debug("Discovered perf event", discovered_perf_event=discovered_perf_event.name)
+                extra_args.extend(discovered_perf_event.perf_extra_args())
+            except PerfNoSupportedEvent:
+                logger.critical("Failed to determine perf event to use")
+                raise
+
+        # Determine if we should use period-based sampling
+        use_period = perf_period is not None
 
         if perf_mode in ("fp", "smart"):
             self._perf_fp: Optional[PerfProcess] = PerfProcess(
@@ -224,6 +242,9 @@ class SystemProfiler(ProfilerBase):
                 use_cgroups=self._perf_use_cgroups,
                 max_cgroups=self._perf_max_cgroups,
                 max_docker_containers=self._perf_max_docker_containers,
+                custom_event_name=custom_event_name,
+                use_period=use_period,
+                period_value=perf_period,
             )
             self._perfs.append(self._perf_fp)
         else:
@@ -243,6 +264,9 @@ class SystemProfiler(ProfilerBase):
                 use_cgroups=self._perf_use_cgroups,
                 max_cgroups=self._perf_max_cgroups,
                 max_docker_containers=self._perf_max_docker_containers,
+                custom_event_name=custom_event_name,
+                use_period=use_period,
+                period_value=perf_period,
             )
             self._perfs.append(self._perf_dwarf)
         else:

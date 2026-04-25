@@ -51,6 +51,9 @@ class PerfProcess:
         use_cgroups: bool = False,
         max_cgroups: int = 50,
         max_docker_containers: int = 0,
+        custom_event_name: Optional[str] = None,
+        use_period: bool = False,
+        period_value: Optional[int] = None,
     ):
         self._start_time = 0.0
         self._frequency = frequency
@@ -132,12 +135,21 @@ class PerfProcess:
         self._extra_args = extra_args
         self._switch_timeout_s = switch_timeout_s
         self._process: Optional[Popen] = None
+        self._custom_event_name = custom_event_name
+        self._use_period = use_period
+        self._period_value = period_value
 
     @property
     def _log_name(self) -> str:
         return f"perf ({self._type} mode)"
 
     def _get_perf_cmd(self) -> List[str]:
+        # Use period-based sampling if specified, otherwise frequency-based
+        if self._use_period and self._period_value is not None:
+            sampling_args = ["-c", str(self._period_value)]
+        else:
+            sampling_args = ["-F", str(self._frequency)]
+
         # When using cgroups, perf requires events to be specified before cgroups.
         # If no explicit events are provided but cgroups are used, add default event.
         # For multiple cgroups, perf requires one event per cgroup.
@@ -180,8 +192,9 @@ class PerfProcess:
             [
                 perf_path(),
                 "record",
-                "-F",
-                str(self._frequency),
+            ]
+            + sampling_args
+            + [
                 "-g",
                 "-o",
                 self._output_path,
