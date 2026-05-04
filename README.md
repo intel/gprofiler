@@ -603,3 +603,4 @@ We recommend going through our [contribution guide](./CONTRIBUTING.md) for more 
 # Footnotes
 
 <a name="perf-native">1</a>: To profile native programs that were compiled without frame pointers, make sure you use the `--perf-mode smart` (which is the default). Read more about it in the [Profiling options](#profiling-options) section[↩](#a1)
+
