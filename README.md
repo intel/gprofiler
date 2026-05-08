@@ -150,6 +150,48 @@ sudo ./gprofiler --perf-event my-custom-event --hw-events-file /path/to/hw_event
 
 **Custom Events Template:** A template file for custom PMU events is available at `gprofiler/resources/hw_events_template.json`.
 
+### PerfSpect collection options
+
+gProfiler supports collecting hardware metrics using Intel's [PerfSpect](https://github.com/intel/PerfSpect) tool. PerfSpect provides high-level Topdown Microarchitecture Analysis (TMA) metrics and system-level hardware telemetry including CPU utilization, memory bandwidth, cache metrics, and other performance counters.
+
+**Requirements:**
+- **Platform:** Linux x86_64 platforms based on Intel architecture. Limited support on other HW platforms.
+- **External tool:** PerfSpect must be downloaded from https://github.com/intel/PerfSpect and deployed separately. gProfiler does not bundle PerfSpect.
+- **Permissions:** The PerfSpect binary must be executable
+
+**Options:**
+
+* `--enable-hw-metrics-collection`: Enable hardware metrics collection through the PerfSpect tool. This flag alone is not sufficient - you must also provide the path to the PerfSpect binary via `--perfspect-path`.
+
+* `--perfspect-path`: Path to the PerfSpect binary executable. This option is required when `--enable-hw-metrics-collection` is enabled. gProfiler will verify the binary exists and is executable before starting collection.
+
+* `--perfspect-duration`: Duration in seconds for each PerfSpect collection cycle (default: 60 seconds). This controls how long PerfSpect collects hardware metrics data before generating a summary.
+
+**Dependencies:**
+- `--enable-hw-metrics-collection` requires `--perfspect-path` to be specified
+- `--perfspect-path` requires the PerfSpect binary to exist and be executable
+
+**Examples:**
+
+```bash
+# Download and extract PerfSpect (example for Linux x86_64)
+wget https://github.com/intel/PerfSpect/releases/latest/download/perfspect_linux_x86_64.tar.gz
+tar -xzf perfspect_linux_x86_64.tar.gz
+chmod +x perfspect
+
+# Run gProfiler with PerfSpect hardware metrics collection
+sudo ./gprofiler --enable-hw-metrics-collection --perfspect-path /path/to/perfspect -d 60 -o /tmp
+
+# Run with custom PerfSpect duration (120 seconds)
+sudo ./gprofiler --enable-hw-metrics-collection --perfspect-path /path/to/perfspect --perfspect-duration 120 -d 120 -o /tmp
+
+# Run in continuous mode with PerfSpect and upload to Performance Studio
+sudo ./gprofiler -cu --token="<TOKEN>" --service-name="<SERVICE NAME>" \
+    --enable-hw-metrics-collection --perfspect-path /path/to/perfspect
+```
+
+**Note:** When verbose mode (`-v`) is enabled, gProfiler will also enable PerfSpect's debug output for additional diagnostics. The collected hardware metrics are included in the profile data uploaded to the Performance Studio.
+
 ## Rootless mode
 gProfiler can be run in rootless mode, profiling without root or sudo access with limited functionality by using the `--rootless` argument.
 
