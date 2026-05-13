@@ -15,7 +15,7 @@
 #
 import signal
 import subprocess
-from typing import List, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 class PerfNoSupportedEvent(Exception):
@@ -85,7 +85,8 @@ class ProgramMissingException(Exception):
 
 
 class APIError(Exception):
-    def __init__(self, message: str, full_data: dict = None):
+    def __init__(self, message: str, full_data: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
         self.message = message
         self.full_data = full_data
 
