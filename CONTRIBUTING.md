@@ -137,3 +137,6 @@ If you cannot find an existing issue that describes your bug or feature, create 
 Please open a single issue per problem and/or feature request, and try to provide as much information as you can. This will help reproduce the issue or implement the new functionality.
 
 When opening an issue you should follow the specific issue template for directions and try to provide all the information necessary.
+
+#### Make good use of AI tools
+Using AI tools to review PRs is a good way to speed up development cycles
