@@ -122,9 +122,13 @@ def test_python_matrix(
 
     # Use longer duration for pyperf to ensure enough samples are collected for reliable assertions
     duration = 5 if profiler_type == "pyperf" else 2
-    with PythonProfiler(1000, duration, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
+    # Timeout should be longer than duration to allow profiling to complete
+    snapshot_timeout = duration + 5
+    with PythonProfiler(
+        1000, duration, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]
+    ) as profiler:
         try:
-            profile = snapshot_pid_profile(profiler, application_pid)
+            profile = snapshot_pid_profile(profiler, application_pid, timeout=snapshot_timeout)
         except TimeoutError:
             if profiler._ebpf_profiler is not None and profiler._ebpf_profiler.process is not None:
                 PythonEbpfProfiler._check_output(profiler._ebpf_profiler.process, profiler._ebpf_profiler.output_path)
@@ -188,8 +192,12 @@ def test_dso_name_in_pyperf_profile(
 
     # Use longer duration for pyperf to ensure enough samples are collected
     duration = 5 if profiler_type == "pyperf" else 2
-    with PythonProfiler(1000, duration, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
-        profile = snapshot_pid_profile(profiler, application_pid)
+    # Timeout should be longer than duration to allow profiling to complete
+    snapshot_timeout = duration + 5
+    with PythonProfiler(
+        1000, duration, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]
+    ) as profiler:
+        profile = snapshot_pid_profile(profiler, application_pid, timeout=snapshot_timeout)
     python_version, _, _ = application_image_tag.split("-")
     interpreter_frame = "PyEval_EvalFrameEx" if python_version == "2.7" else "_PyEval_EvalFrameDefault"
     collapsed = profile.stacks
