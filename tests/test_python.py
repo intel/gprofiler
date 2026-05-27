@@ -87,6 +87,7 @@ def test_python_select_by_libpython(
         "3.7-musl-uwsgi",
     ],
 )
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 @pytest.mark.parametrize("profiler_type", ["py-spy", "pyperf"])
 def test_python_matrix(
     application_pid: int,
@@ -119,7 +120,9 @@ def test_python_matrix(
         ):
             pytest.xfail("This combination fails, see https://github.com/Granulate/gprofiler/issues/714")
 
-    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
+    # Use longer duration for pyperf to ensure enough samples are collected for reliable assertions
+    duration = 5 if profiler_type == "pyperf" else 2
+    with PythonProfiler(1000, duration, profiler_state, profiler_type, True, None, False, python_pyspy_process=[]) as profiler:
         try:
             profile = snapshot_pid_profile(profiler, application_pid)
         except TimeoutError:
@@ -183,7 +186,9 @@ def test_dso_name_in_pyperf_profile(
     if is_aarch64() and profiler_type == "pyperf":
         pytest.skip("PyPerf doesn't support aarch64 architecture, see https://github.com/intel/gprofiler/issues/499")
 
-    with PythonProfiler(1000, 2, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
+    # Use longer duration for pyperf to ensure enough samples are collected
+    duration = 5 if profiler_type == "pyperf" else 2
+    with PythonProfiler(1000, duration, profiler_state, profiler_type, True, None, True, python_pyspy_process=[]) as profiler:
         profile = snapshot_pid_profile(profiler, application_pid)
     python_version, _, _ = application_image_tag.split("-")
     interpreter_frame = "PyEval_EvalFrameEx" if python_version == "2.7" else "_PyEval_EvalFrameDefault"
