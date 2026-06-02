@@ -49,4 +49,6 @@ if __name__ == "__main__":
     Thread(target=parser).start()
     lister = Lister()
     while True:
-        lister.lister()
+        # Call multiple times per iteration to increase chance of being sampled by profilers
+        for _ in range(10):
+            lister.lister()
