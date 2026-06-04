@@ -38,18 +38,33 @@ export GPROFILER_SERVICE="your-service-name"
 export GPROFILER_SERVER="http://localhost:8080"
 
 /opt/gprofiler/gprofiler \
+  --enable-heartbeat-server \
   -u \
   --token=$GPROFILER_TOKEN \
   --service-name=$GPROFILER_SERVICE \
-  --server-host $GPROFILER_SERVER \
+  --api-server $GPROFILER_SERVER \
   --dont-send-logs \
   --server-upload-timeout 10 \
   -c \
   --disable-metrics-collection \
   --java-safemode= \
+  --heartbeat-interval 30 \
   -d 60 \
   --java-no-version-check
 ```
+
+`--server-host` still exists as a deprecated alias, but prefer `--api-server`.
+
+### Required flags
+
+Current `main.py` validation requires heartbeat mode to include:
+
+- `--enable-heartbeat-server`
+- `--upload-results`
+- `--token`
+- `--service-name`
+
+Use the skill to explain or debug this mode only in terms of the current flags above.
 
 ### Command Flow
 
@@ -80,6 +95,8 @@ export GPROFILER_SERVER="http://localhost:8080"
 | `continuous_queue` | Long-running start commands | 1 |
 
 Priority: `stop > adhoc > continuous`
+
+The current implementation lives under `gprofiler/dynamic_profiling_management/`. Do not refer users to `gprofiler/command_control.py`; that path is stale.
 
 ### API Endpoints
 
@@ -133,10 +150,34 @@ Requirements:
 ### Key Files
 
 ```
-gprofiler/main.py              # Heartbeat integration
-gprofiler/command_control.py   # CommandManager class
-docs/HEARTBEAT_SYSTEM_README.md # Full documentation
+gprofiler/main.py                                       # CLI + heartbeat flag validation
+gprofiler/dynamic_profiling_management/heartbeat.py     # Polling and command handling
+gprofiler/dynamic_profiling_management/command_control.py # Queue logic and priority
+gprofiler/dynamic_profiling_management/continuous.py    # Continuous slot
+gprofiler/dynamic_profiling_management/ad_hoc.py        # Ad-hoc slot
+tests/test_heartbeat_system.py                          # Heartbeat flow validation
+docs/HEARTBEAT_SYSTEM_README.md                         # Full documentation
 ```
+
+### Testing heartbeat changes
+
+Use the smallest useful validation first:
+
+```bash
+# Focused heartbeat test
+sudo python3 -m pytest -v tests/test_heartbeat_system.py
+
+# Lightweight broader regression
+sudo ./tests/test.sh --executable
+```
+
+For local end-to-end testing against a backend, the repo docs describe this sequence:
+
+1. Start the Performance Studio backend.
+2. Run `python tests/run_heartbeat_agent.py`
+3. Submit commands with `python tests/test_heartbeat_system.py --live`
+
+Prefer the existing docs/test scripts over inventing custom heartbeat harnesses.
 
 ### Troubleshooting
 
@@ -161,6 +202,7 @@ docs/HEARTBEAT_SYSTEM_README.md # Full documentation
 --enable-heartbeat-server     # Enable heartbeat mode
 --heartbeat-interval 30       # Heartbeat frequency (seconds)
 --api-server URL              # Backend server URL
+--server-host URL             # Deprecated alias for --api-server
 --upload-results              # Required for heartbeat mode
 --token TOKEN                 # Authentication token
 --service-name NAME           # Service identifier
@@ -168,15 +210,9 @@ docs/HEARTBEAT_SYSTEM_README.md # Full documentation
 --perfspect-path PATH         # PerfSpect binary path
 ```
 
----
+### Review points for heartbeat work
 
-## TODO: Skill Content to Add
-
-- [ ] **Add complete API reference** - All heartbeat API endpoints with examples
-- [ ] **Add command_control.py documentation** - CommandManager class details
-- [ ] **Add authentication flow** - Token validation and refresh
-- [ ] **Add error response codes** - All possible error responses
-- [ ] **Add deployment examples** - K8s, Docker Compose, systemd configs
-- [ ] **Add PerfSpect output examples** - Sample hardware metrics output
-- [ ] **Add monitoring integration** - How to monitor heartbeat health
-- [ ] **Add scaling guidance** - Multi-agent deployment patterns
+- Preserve queue semantics: `stop > adhoc > continuous`
+- Preserve idempotency; do not allow the same command to execute twice
+- Avoid moving heartbeat logic into `main.py` if `dynamic_profiling_management/` is sufficient
+- Add targeted heartbeat tests before broader regression runs

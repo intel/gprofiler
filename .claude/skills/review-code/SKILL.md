@@ -9,6 +9,20 @@ description: Review code changes against gProfiler coding standards. Use when th
 
 !`git diff --stat HEAD 2>/dev/null || echo "No git changes"`
 
+### Hotspots to review carefully
+
+Large shared files deserve extra skepticism because regressions spread quickly:
+
+| File | Approx. lines | Review concern |
+|------|---------------|----------------|
+| `gprofiler/main.py` | ~1546 | Broad orchestration / CLI changes can affect many runtimes |
+| `gprofiler/profilers/java.py` | ~1555 | Complex runtime-specific behavior |
+| `tests/conftest.py` | ~708 | Shared fixtures; small changes can break many tests |
+| `gprofiler/dynamic_profiling_management/heartbeat.py` | ~354 | Command-control behavior and backend contract |
+| `gprofiler/dynamic_profiling_management/command_control.py` | ~233 | Queue semantics and execution ordering |
+
+Ask whether the change could have been made in a smaller seam before accepting edits to these files.
+
 ### Coding Standards
 
 #### Python Style
@@ -30,10 +44,20 @@ description: Review code changes against gProfiler coding standards. Use when th
 - [ ] Respects `stop_event` for cancellation
 - [ ] Handles missing/unavailable profiler tools
 
+#### Architecture-Aware Checks
+- [ ] The change extends an existing flow instead of creating a parallel one
+- [ ] Dynamic profiling work stays in `gprofiler/dynamic_profiling_management/` unless `main.py` wiring is truly required
+- [ ] `CommandManager` behavior still preserves `stop > adhoc > continuous`
+- [ ] Idempotency / completion semantics still make sense for command-driven changes
+- [ ] Shared fixtures in `tests/conftest.py` changed only if multiple tests truly need new shared infra
+- [ ] User-visible CLI or runtime behavior stays backward-compatible unless the change explicitly intends a break
+
 #### Testing
 - [ ] Tests added for new functionality
-- [ ] Tests run with root privileges considered
-- [ ] Docker fixtures used for runtime testing
+- [ ] The smallest relevant targeted tests were run first
+- [ ] Root privileges and runtime requirements were considered
+- [ ] Broader regression coverage was added when shared code changed
+- [ ] Docker fixtures / existing test harness were used instead of ad-hoc setup
 
 #### Documentation
 - [ ] README updated for user-facing changes
@@ -50,16 +74,16 @@ description: Review code changes against gProfiler coding standards. Use when th
    - Unclosed file handles or processes
    - Missing cleanup in exception paths
    - Hardcoded paths that should be configurable
+5. If command-control files changed, explicitly review:
+   - queue priority
+   - pause/resume behavior
+   - duplicate-command protection
+   - completion / failure reporting
+6. If `main.py` or `tests/conftest.py` changed, ask whether a smaller module could have absorbed the change
 
----
+### Common regression traps
 
-## TODO: Skill Content to Add
-
-- [ ] **Add code pattern examples** - Good vs bad code patterns
-- [ ] **Add profiler-specific review rules** - Per-profiler considerations
-- [ ] **Add performance review criteria** - Overhead and efficiency checks
-- [ ] **Add security checklist expansion** - More security review items
-- [ ] **Add test coverage requirements** - Minimum coverage expectations
-- [ ] **Add backwards compatibility checks** - CLI and API stability
-- [ ] **Add resource cleanup patterns** - File handle and process cleanup
-- [ ] **Add logging review guidelines** - What and how to log
+- Putting runtime-specific logic into `main.py` instead of the relevant profiler or dynamic-profiling module
+- Introducing a second control path instead of extending heartbeat + queue handling
+- Editing shared fixtures for a single test case
+- Adding heavyweight full-suite expectations when a narrower targeted test would have validated the change first
