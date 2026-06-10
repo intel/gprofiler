@@ -206,7 +206,7 @@ def assert_ldd_version_container(container: Container, version: str) -> None:
     assert version_in_container == version, f"ldd version in container: {version_in_container}, expected {version}"
 
 
-def snapshot_pid_profile(profiler: ProfilerInterface, pid: int) -> ProfileData:
+def snapshot_pid_profile(profiler: ProfilerInterface, pid: int, timeout: int = 5) -> ProfileData:
     last_snapshot = profiler.snapshot()
 
     def has_profile() -> bool:
@@ -216,7 +216,7 @@ def snapshot_pid_profile(profiler: ProfilerInterface, pid: int) -> ProfileData:
         last_snapshot = profiler.snapshot()
         return pid in last_snapshot
 
-    wait_event(timeout=5, stop_event=Event(), condition=has_profile, interval=2.0)
+    wait_event(timeout=timeout, stop_event=Event(), condition=has_profile, interval=2.0)
     return last_snapshot[pid]
 
 

@@ -39,17 +39,13 @@ UBUNTU_VERSION_1804=@sha256:dca176c9663a7ba4c1f0e710986f5a25e672842963d95b960191
 # phpspy & pyperf - ubuntu:20.04
 UBUNTU_VERSION=@sha256:cf31af331f38d1d7158470e095b132acd126a7180a54f263d386da88eb681d93
 # async-profiler glibc - centos:7
-# requires CentOS 7 so the built DSO can be loaded into machines running with old glibc (tested up to centos:6),
-# we do make some modifications to the selected versioned symbols so that we don't use anything from >2.12 (what centos:6
-# has)
 AP_BUILDER_CENTOS=@sha256:0f4ec88e21daf75124b8a9e5ca03c37a5e937e0e108a255d890492430789b60e
 # async-profiler musl - alpine
 AP_BUILDER_ALPINE=@sha256:69704ef328d05a9f806b6b8502915e6a0a4faa4d72018dc42343f511490daf8a
 # dotnet builder - mcr.microsoft.com/dotnet/sdk:6.0.428-1-focal
 DOTNET_BUILDER=@sha256:525ce79a6f545131df515ce34f7ee086eb18e4d707eff9676b2678f2f23b6d9e
-# minimum CentOS version we intend to support with async-profiler (different between x86_64, where we require
-# an older version)
-AP_CENTOS_MIN=:6
+# minimum CentOS version we intend to support with async-profiler
+AP_CENTOS_MIN=:7
 # burn - golang:1.16.3
 BURN_BUILDER_GOLANG=@sha256:f7d3519759ba6988a2b73b5874b17c5958ac7d0aa48a8b1d84d66ef25fa345f1
 # bcc & gprofiler - centos:7
