@@ -39,6 +39,9 @@ def get_profilers(
             lower_profiler_name = profiler_name.lower()
             profiler_mode = user_args.get(f"{lower_profiler_name}_mode")
             if is_profiler_disabled(cast(str, profiler_mode)):
+                # Warn if Java-specific options are set but Java profiling is disabled
+                if profiler_name == "Java" and user_args.get("java_collect_thread_names"):
+                    logger.warning("--java-collect-thread-names is ignored because Java profiling is disabled")
                 continue
 
             supported_archs = (

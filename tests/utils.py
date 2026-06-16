@@ -243,6 +243,7 @@ def make_java_profiler(
     java_full_hserr: bool = False,
     java_include_method_modifiers: bool = False,
     java_line_numbers: str = "none",
+    java_collect_thread_names: bool = False,
 ) -> JavaProfiler:
     return JavaProfiler(
         frequency=frequency,
@@ -263,6 +264,7 @@ def make_java_profiler(
         java_full_hserr=java_full_hserr,
         java_include_method_modifiers=java_include_method_modifiers,
         java_line_numbers=java_line_numbers,
+        java_collect_thread_names=java_collect_thread_names,
     )
 
 
