@@ -60,6 +60,7 @@ For each profiling session (each profiling duration), gProfiler produces outputs
 
 * `--no-java` or `--java-mode disabled`: Disable profilers for Java.
 * `--no-java-async-profiler-buildids`: Disable embedding of buildid+offset in async-profiler native frames (used when debug symbols are unavailable).
+* `--java-collect-thread-names`: Enable per-sample thread name tracking. When enabled, each stack trace sample records the thread name at sample time, allowing accurate attribution when threads are renamed (e.g., in thread pools).
 
 ### Python profiling options
 * `--no-python`: Alias of `--python-mode disabled`.

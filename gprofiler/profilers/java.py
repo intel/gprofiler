@@ -531,6 +531,7 @@ class AsyncProfiledProcess:
         collect_meminfo: bool = True,
         include_method_modifiers: bool = False,
         java_line_numbers: str = "none",
+        collect_thread_names: bool = False,
     ):
         self.process = process
         self._profiler_state = profiler_state
@@ -582,6 +583,7 @@ class AsyncProfiledProcess:
         self._collect_meminfo = collect_meminfo
         self._include_method_modifiers = ",includemm" if include_method_modifiers else ""
         self._include_line_numbers = ",includeln" if java_line_numbers == "line-of-function" else ""
+        self._threads_enabled = ",threads" if collect_thread_names else ""
 
     def _find_rw_exec_dir(self) -> str:
         """
@@ -744,6 +746,7 @@ class AsyncProfiledProcess:
     def _get_start_cmd(self, interval: int, ap_timeout: int) -> List[str]:
         return self._get_base_cmd() + [
             f"start,event={self._mode}"
+            f"{self._threads_enabled}"
             f"{self._get_ap_output_args()}{self._get_interval_arg(interval)},"
             f"log={self._log_path_process}"
             f"{f',fdtransfer={self._fdtransfer_path}' if self._mode == 'cpu' else ''}"
@@ -756,6 +759,7 @@ class AsyncProfiledProcess:
     def _get_stop_cmd(self, with_output: bool) -> List[str]:
         return self._get_base_cmd() + [
             f"stop,log={self._log_path_process},mcache={self._mcache}"
+            f"{self._threads_enabled}"
             f"{self._get_ap_output_args() if with_output else ''}"
             f"{',lib' if self._profiler_state.insert_dso_name else ''}{',meminfolog' if self._collect_meminfo else ''}"
             f"{self._get_extra_ap_args()}"
@@ -994,6 +998,15 @@ class AsyncProfiledProcess:
             default="none",
             help="Select if async-profiler should add line numbers to frames",
         ),
+        ProfilerArgument(
+            "--java-collect-thread-names",
+            dest="java_collect_thread_names",
+            action="store_true",
+            default=False,
+            help="Enable per-sample thread name tracking. When enabled, each stack trace sample records "
+            "the thread name at sample time, allowing accurate attribution when threads are renamed "
+            "(e.g., in thread pools). Adds ~256KB memory and periodic thread name polling overhead.",
+        ),
     ],
     supported_profiling_modes=["cpu", "allocation"],
 )
@@ -1041,6 +1054,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
         java_full_hserr: bool,
         java_include_method_modifiers: bool,
         java_line_numbers: str,
+        java_collect_thread_names: bool = False,
         min_duration: int = 0,
     ):
         assert java_mode == "ap", "Java profiler should not be initialized, wrong java_mode value given"
@@ -1086,6 +1100,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
         self._java_full_hserr = java_full_hserr
         self._include_method_modifiers = java_include_method_modifiers
         self._java_line_numbers = java_line_numbers
+        self._collect_thread_names = java_collect_thread_names
 
     def _init_ap_mode(self, profiling_mode: str, ap_mode: str) -> None:
         assert profiling_mode in (
@@ -1333,6 +1348,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
             self._report_meminfo,
             self._include_method_modifiers,
             self._java_line_numbers,
+            self._collect_thread_names,
         ) as ap_proc:
             stackcollapse = self._profile_ap_process(ap_proc, comm, duration)
 
