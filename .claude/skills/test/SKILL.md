@@ -8,6 +8,17 @@ allowed-tools: Bash(sudo *) Bash(pytest *) Bash(python3 -m pytest *) Bash(./test
 
 **Important:** Tests require root privileges (sudo) for profiling system resources.
 
+### First-time local setup
+
+```bash
+git submodule update --init
+python3 -m pip install -r requirements.txt -r dev-requirements.txt
+sudo python3 -m pip install -r requirements.txt -r dev-requirements.txt
+./scripts/copy_resources_from_image.sh
+```
+
+Prefer the repo's existing harness over custom setup scripts. `tests/test.sh` already installs missing apt packages unless `NO_APT_INSTALL` is set, checks required resources, and runs pytest with the expected environment.
+
 ### Quick Commands
 
 ```bash
@@ -26,6 +37,19 @@ cd tests && sudo python3 -m pytest -v -k "test_java_profiling"
 # Run with verbose output
 cd tests && sudo python3 -m pytest -v -s test_sanity.py
 ```
+
+### Staged test strategy
+
+Run the narrowest useful tests first, then widen:
+
+| Change type | First tests | Then |
+|-------------|-------------|------|
+| Heartbeat / dynamic profiling / queue logic | `sudo python3 -m pytest -v tests/test_heartbeat_system.py` | `sudo ./tests/test.sh --executable`, then `sudo ./tests/test.sh` if shared code changed |
+| Specific profiler | Target that profiler's test file | `sudo ./tests/test.sh --executable` or full suite if lifecycle/shared infra changed |
+| Merge / metadata / output | `tests/test_merge.py`, `tests/test_app_metadata.py`, `tests/test_appids.py` | Broader regression depending on touched files |
+| `main.py`, `tests/conftest.py`, or cross-cutting changes | Most relevant targeted tests first | Always end with `sudo ./tests/test.sh` |
+
+This staged approach reduces regression risk without paying full-suite cost for every small change.
 
 ### Test Categories
 
@@ -68,6 +92,8 @@ cd tests && sudo python3 -m pytest -v -s test_sanity.py
 - `pytest-rerunfailures` - Retry flaky tests
 - `pytest-timeout` - Prevent hanging tests
 
+Treat `tests/conftest.py` as shared infrastructure. Only change it when multiple tests need new common behavior.
+
 ### Running Tests for Specific Profilers
 
 ```bash
@@ -104,16 +130,24 @@ cd tests && sudo python3 -m pytest -v --ignore=test_bigdata.py
 
 ### Test Environment Setup
 
+For most contributors, the setup above plus `sudo ./tests/test.sh --executable` is the fastest way to prove the local test stack is healthy.
+
+### Heartbeat / local e2e testing
+
+For command-driven profiling changes:
+
 ```bash
-# Install dev dependencies
-pip3 install -r dev-requirements.txt
-
-# Ensure root has same packages
-sudo pip3 install -r dev-requirements.txt
-
-# Copy resources (if testing from source)
-./scripts/copy_resources_from_image.sh
+# Focused heartbeat validation
+sudo python3 -m pytest -v tests/test_heartbeat_system.py
 ```
+
+For a live backend flow, the heartbeat docs describe:
+
+1. Start Performance Studio backend
+2. Run `python tests/run_heartbeat_agent.py`
+3. Submit commands with `python tests/test_heartbeat_system.py --live`
+
+Use the existing scripts above instead of writing a one-off harness.
 
 ### Debugging Test Failures
 
@@ -138,15 +172,9 @@ docker logs <container_id>
 4. Run container tests
 5. Deploy on tag push
 
----
+### Validation checklist
 
-## TODO: Skill Content to Add
-
-- [ ] **Add test fixture documentation** - Explain each conftest.py fixture in detail
-- [ ] **Add example test patterns** - Copy-paste templates for new profiler tests
-- [ ] **Add Docker test image list** - Complete list of runtime test images
-- [ ] **Add test environment variables** - Document all test-related env vars
-- [ ] **Add local test setup guide** - Step-by-step for first-time test runners
-- [ ] **Add test output interpretation** - How to read test results and logs
-- [ ] **Add flaky test retry patterns** - Document retry decorator usage
-- [ ] **Add CI test matrix details** - What tests run on which platforms
+- [ ] Choose targeted tests based on the changed architecture area
+- [ ] Use `sudo ./tests/test.sh --executable` as the default broader sanity pass
+- [ ] Run full `sudo ./tests/test.sh` after shared-fixture or cross-cutting changes
+- [ ] Reuse existing test harness/scripts instead of ad-hoc local setup

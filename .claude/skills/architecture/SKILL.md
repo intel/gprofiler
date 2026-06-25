@@ -7,105 +7,75 @@ user-invocable: true
 
 ## gProfiler Architecture Overview
 
-### High-Level Architecture
+gProfiler now has two important paths:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      gprofiler/main.py                       │
-│                    (Orchestration Layer)                     │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐│
-│  │  perf   │ │  Java   │ │ Python  │ │  Ruby   │ │  .NET  ││
-│  │profiler │ │profiler │ │profiler │ │profiler │ │profiler││
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └───┬────┘│
-│       └──────────┴──────────┴──────────┴───────────┘      │
-│                         ▼                                   │
-│              gprofiler/merge.py                             │
-│           (Profile Data Aggregation)                        │
-├─────────────────────────────────────────────────────────────┤
-│                    Output Layer                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │ Flamegraph  │  │   Upload    │  │   Local Output      │ │
-│  │   (HTML)    │  │  (Studio)   │  │   (collapsed)       │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+1. **Classic profiling path**: discover processes -> select profilers -> collect samples -> merge -> output/upload
+2. **Dynamic profiling control path**: heartbeat with backend -> receive commands -> queue/prioritize -> run continuous or ad-hoc profiling -> report completion
 
-### Key Components
+When answering architecture questions, identify which path the request touches before reading or editing code.
 
-#### 1. Profiler Registry (`gprofiler/profilers/registry.py`)
-- Decorator-based profiler registration
-- Runtime discovery of available profilers
-- Configuration-based profiler selection
+### Main architecture areas
 
-#### 2. Profiler Base (`gprofiler/profilers/profiler_base.py`)
-- Abstract base class for all profilers
-- Lifecycle: `start()` → `snapshot()` → `stop()`
-- Common utilities for process discovery
+| Area | Primary files | What belongs here |
+|------|---------------|-------------------|
+| CLI + orchestration | `gprofiler/main.py` (~1546) | Argument parsing, runtime wiring, top-level orchestration. Treat as a hotspot; avoid broad edits if a narrower seam exists. |
+| Profiler registration + lifecycle | `gprofiler/profilers/registry.py`, `gprofiler/profilers/profiler_base.py` | Registration, mode selection, `start()` / `snapshot()` / `stop()` lifecycle. |
+| Runtime profilers | `gprofiler/profilers/*.py` | Runtime/tool-specific logic: process discovery, sampling, stack parsing, cleanup. |
+| Merge/output | `gprofiler/merge.py` (~330) | Stack aggregation, symbol handling, output shaping. |
+| Metadata enrichment | `gprofiler/metadata/` | Application identifiers and host/system metadata. |
+| Dynamic profiling command control | `gprofiler/dynamic_profiling_management/heartbeat.py` (~354), `command_control.py` (~233), `continuous.py` (~68), `ad_hoc.py` (~76) | Heartbeat polling, command parsing, queue priority, pause/resume, execution routing. |
+| Shared test infrastructure | `tests/conftest.py` (~708) | Docker fixtures, runtime builders, cleanup. Shared and regression-sensitive. |
 
-#### 3. Individual Profilers (`gprofiler/profilers/*.py`)
+### Runtime profilers
 
-| Profiler | Backend Tool | Key Features |
-|----------|--------------|--------------|
-| `perf.py` | Linux perf | System-wide, kernel stacks |
-| `java.py` | async-profiler | JVM attach, allocation profiling |
-| `python.py` | py-spy | No instrumentation needed |
-| `python_ebpf.py` | PyPerf | eBPF-based, lower overhead |
+| Profiler | Backend tool | Notes |
+|----------|--------------|-------|
+| `perf.py` | Linux perf | System-wide profiling, kernel/user stacks |
+| `java.py` | async-profiler | JVM attach, allocation profiling, large hotspot (~1555 lines) |
+| `python.py` | py-spy | Python sampling without instrumentation |
+| `python_ebpf.py` | PyPerf | eBPF-based Python profiling |
 | `ruby.py` | rbspy | Ruby VM sampling |
 | `php.py` | phpspy | PHP process profiling |
-| `dotnet.py` | dotnet-trace | .NET Core/5+ support |
-| `node.py` | perf | V8 JavaScript profiling |
+| `dotnet.py` | dotnet-trace | .NET support |
+| `node.py` | perf | Node/V8 profiling |
 
-#### 4. Merge Layer (`gprofiler/merge.py`)
-- Combines samples from multiple profilers
-- Handles symbol resolution
-- Produces unified stack traces
+### Classic profiling data flow
 
-#### 5. Metadata Collection (`gprofiler/metadata/`)
-- `application_identifiers.py` - Extracts app names from processes
-- `system_metadata.py` - Collects host information
-- Enriches profiles with context
-
-### Data Flow
-
-```
-1. Process Discovery
-   └── Scan /proc for target processes
-
-2. Profiler Selection
-   └── Match processes to appropriate profilers
-
-3. Sampling
-   └── Each profiler collects stacks independently
-
-4. Aggregation
-   └── merge.py combines all samples
-
-5. Output
-   └── Generate flamegraph or upload to Studio
+```text
+1. Discover target processes
+2. Select profilers / modes
+3. Each profiler samples independently
+4. merge.py aggregates results
+5. Output collapsed stacks, flamegraph data, or upload results
 ```
 
-### Key Files to Understand
+### Dynamic profiling control flow
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `main.py` | ~1500 | Entry point, CLI, orchestration |
-| `profilers/perf.py` | ~500 | Core perf integration |
-| `profilers/java.py` | ~1800 | Complex JVM profiling |
-| `merge.py` | ~400 | Profile aggregation |
-| `utils/perf_process.py` | ~200 | perf subprocess management |
+```text
+1. Backend receives profiling request
+2. Agent heartbeat polls for work
+3. heartbeat.py parses command payload
+4. command_control.py enqueues by priority
+5. continuous.py or ad_hoc.py executes the command
+6. Agent reports command completion
+```
 
-### Extension Points
+Priority is `stop > adhoc > continuous`. Do not describe or implement a parallel control path unless the existing heartbeat/queue system is truly insufficient.
 
-1. **Add new profiler**: Implement `ProfilerBase`, use `@register_profiler`
-2. **Add metadata**: Extend `application_identifiers.py`
-3. **New output format**: Modify `main.py` output handling
-4. **New deployment**: Add to `deploy/` directory
+### Where to make changes
 
-### Instructions
+- **Add a new profiler**: new file under `gprofiler/profilers/`, register via `@register_profiler`, add targeted tests.
+- **Change profiler behavior**: edit the specific profiler first; avoid `main.py` unless CLI/wiring must change.
+- **Change merge or output**: start in `gprofiler/merge.py`.
+- **Change heartbeat / dynamic profiling**: start in `gprofiler/dynamic_profiling_management/`.
+- **Change shared test behavior**: touch `tests/conftest.py` only when multiple tests need new shared infra.
 
-When user asks about architecture:
-1. Start with high-level overview above
-2. Dive into specific component if asked
-3. Reference actual code files with line numbers
-4. Explain data flow through the system
+### Guidance when answering users
+
+1. Start with the smallest relevant architecture slice, not the whole repo.
+2. If the request is about command-driven profiling, include the heartbeat + queue modules, not just `main.py`.
+3. Call out hotspot files when relevant:
+   - `gprofiler/main.py` (~1546)
+   - `gprofiler/profilers/java.py` (~1555)
+   - `tests/conftest.py` (~708)
+4. Prefer concrete file references over generic descriptions.
