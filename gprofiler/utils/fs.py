@@ -120,7 +120,6 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
         raise Exception(f"expected {path.parent} to be owned by root!")
 
     if path.exists():
-        return
         if is_root() and is_owned_by_root(path):
             return
 
