@@ -78,30 +78,42 @@ def is_owned_by_root(path: Path) -> bool:
     return statbuf.st_uid == 0 and statbuf.st_gid == 0
 
 
+def is_owned_by_current_user(path: Path) -> bool:
+    """Check if path is owned by the current user."""
+    statbuf = path.stat()
+    return statbuf.st_uid == os.getuid()
+
+
 def mkdir_owned_root_wrapper(path: Union[str, Path], mode: int = 0o755) -> None:
     """
-    Ensures a directory exists and writable.
+    Ensures a directory exists and is owned by the current user.
 
-    If the directory exists and is not writable, the function raises.
-    If the directory exists and is not writable, it is left as is.
+    If the directory exists and is owned by the current user, it is left as is.
+    If the directory exists and is not owned by the current user, the function raises.
     If the directory doesn't exist, it is created.
     """
     if is_root():
         return mkdir_owned_root(path)
 
     path = path if isinstance(path, Path) else Path(path)
-    if path.exists():
-        if not os.access(path, os.W_OK):
-            raise Exception(f"{str(path)} is not writable by current user")
-        return
+    if path.exists() or path.is_symlink():
+        # Check for symlink first (don't follow it)
+        if path.is_symlink():
+            raise Exception(f"{str(path)} is a symlink, refusing to use it")
+        if is_owned_by_current_user(path):
+            return
+        # Directory exists but is not owned by current user - can't use it safely
+        raise Exception(f"{str(path)} exists but is not owned by current user")
 
     try:
         os.mkdir(path, mode=mode)
     except FileExistsError:
-        # likely racing with another thread of gprofiler. as long as the directory is the user after all, we're good.
-        if not os.access(path, os.W_OK):
-            raise Exception(f"{str(path)} is not writable by current user")
+        # likely racing with another thread of gprofiler. as long as the directory is owned by current user, we're good.
         pass
+
+    # Verify ownership and not a symlink after creation
+    if path.is_symlink() or not is_owned_by_current_user(path):
+        raise Exception(f"Failed to create directory {str(path)} as owned by current user")
 
 
 def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
@@ -119,8 +131,10 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
     if is_root() and not is_owned_by_root(path.parent):
         raise Exception(f"expected {path.parent} to be owned by root!")
 
-    if path.exists():
-        return
+    if path.exists() or path.is_symlink():
+        # Check for symlink first (don't follow it)
+        if path.is_symlink():
+            raise Exception(f"{str(path)} is a symlink, refusing to use it")
         if is_root() and is_owned_by_root(path):
             return
 
@@ -132,6 +146,7 @@ def mkdir_owned_root(path: Union[str, Path], mode: int = 0o755) -> None:
         # likely racing with another thread of gprofiler. as long as the directory is root after all, we're good.
         pass
 
-    if is_root() and not is_owned_by_root(path):
+    # Verify ownership and not a symlink after creation
+    if path.is_symlink() or (is_root() and not is_owned_by_root(path)):
         # lost race with someone else?
         raise Exception(f"Failed to create directory {str(path)} as owned by root")
