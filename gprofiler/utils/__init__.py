@@ -544,22 +544,28 @@ def _make_drop_privileges_fn(uid: int, gid: int) -> Callable[[], None]:
 
 def run_process_as_target(
     cmd: List[str],
-    target_process: Process,
+    target_uid: int,
+    target_gid: int,
     stop_event: Optional[Event] = None,
     timeout: int = 5,
     **kwargs: Any,
 ) -> "CompletedProcess[bytes]":
     """
-    Execute a command with the same UID/GID as the target process.
+    Execute a command with the specified UID/GID (dropping privileges if root).
 
     Security: This function drops privileges before executing the command,
     preventing privilege escalation if the binary is attacker-controlled.
 
+    Note: Callers must resolve target_uid/target_gid BEFORE entering any
+    PID/mount namespaces, since psutil can't look up host PIDs from inside
+    a different namespace.
+
     Args:
         cmd: Command and arguments to execute
-        target_process: The process whose credentials to use
-        stop_event: Optional event to signal stop
-        timeout: Command timeout in seconds
+        target_uid: The UID to run the command as
+        target_gid: The GID to run the command as
+        stop_event: Optional event to signal stop (created internally if None)
+        timeout: Command timeout in seconds (default: 5)
         **kwargs: Additional arguments passed to run_process()
 
     Returns:
@@ -569,19 +575,17 @@ def run_process_as_target(
     # Our security preexec_fn takes precedence
     kwargs.pop("preexec_fn", None)
 
+    # Create a dummy Event if none provided, so timeouts work
+    # (run_process asserts timeout must be None when stop_event is None)
+    if stop_event is None:
+        stop_event = Event()
+
     preexec_fn: Optional[Callable[[], None]] = None
 
-    # Only drop privileges on Linux when running as root
-    # Check root status first to avoid AccessDenied when non-root targets another user's process
-    if _is_linux_for_priv() and os.geteuid() == 0:
-        target_uids = target_process.uids()
-        target_gids = target_process.gids()
-        # Use real UID/GID (not effective) to match the process owner
-        target_uid = target_uids.real
-        target_gid = target_gids.real
-
-        if target_uid != 0:
-            preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
+    # Only drop privileges on Linux when running as root and target is non-root
+    # Use is_root() which handles user-namespace/container scenarios properly
+    if _is_linux_for_priv() and is_root() and target_uid != 0:
+        preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
 
     return run_process(
         cmd,

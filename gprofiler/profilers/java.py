@@ -365,13 +365,18 @@ def get_java_version(process: Process, stop_event: Event) -> Optional[str]:
     if process_java_path is None:
         return None
 
+    # Get credentials BEFORE entering namespace (psutil can't resolve host PIDs inside namespace)
+    target_uid = process.uids().real
+    target_gid = process.gids().real
+
     def _run_java_version() -> "CompletedProcess[bytes]":
         return run_process_as_target(
             [
                 process_java_path,
                 "-version",
             ],
-            target_process=process,
+            target_uid=target_uid,
+            target_gid=target_gid,
             stop_event=stop_event,
             timeout=_JAVA_VERSION_TIMEOUT,
             pdeathsigger=False,

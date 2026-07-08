@@ -37,10 +37,15 @@ def get_exe_version(
     """
     exe_path = f"/proc/{get_process_nspid(process.pid)}/exe"
 
+    # Get credentials BEFORE entering namespace (psutil can't resolve host PIDs inside namespace)
+    target_uid = process.uids().real
+    target_gid = process.gids().real
+
     def _run_get_version() -> "CompletedProcess[bytes]":
         return run_process_as_target(
             [exe_path, version_arg],
-            target_process=process,
+            target_uid=target_uid,
+            target_gid=target_gid,
             stop_event=stop_event,
             timeout=get_version_timeout,
             pdeathsigger=False,
