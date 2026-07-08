@@ -95,6 +95,7 @@ from gprofiler.utils import (
     remove_prefix,
     resource_path,
     run_process,
+    run_process_as_target,
     touch_path,
     wait_event,
 )
@@ -353,17 +354,24 @@ def _get_process_ns_java_path(process: Process) -> Optional[str]:
 # process is hashable and the same process instance compares equal
 @functools.lru_cache(maxsize=_JAVA_VERSION_CACHE_MAX)
 def get_java_version(process: Process, stop_event: Event) -> Optional[str]:
+    """
+    Get Java version from the process's java binary.
+
+    Security: Executes with the target process's UID/GID to prevent
+    privilege escalation if the binary is attacker-controlled.
+    """
     # make sure we're able to find "java" binary bundled with process libjvm
     process_java_path = _get_process_ns_java_path(process)
     if process_java_path is None:
         return None
 
     def _run_java_version() -> "CompletedProcess[bytes]":
-        return run_process(
+        return run_process_as_target(
             [
                 process_java_path,
                 "-version",
             ],
+            target_process=process,
             stop_event=stop_event,
             timeout=_JAVA_VERSION_TIMEOUT,
             pdeathsigger=False,

@@ -19,7 +19,7 @@ from threading import Event
 from granulate_utils.linux.ns import get_process_nspid, run_in_ns_wrapper
 from psutil import NoSuchProcess, Process
 
-from gprofiler.utils import run_process
+from gprofiler.utils import run_process_as_target
 
 
 def get_exe_version(
@@ -30,13 +30,20 @@ def get_exe_version(
     try_stderr: bool = False,
 ) -> str:
     """
-    Runs {process.exe()} --version in the appropriate namespace
+    Runs {process.exe()} --version in the appropriate namespace.
+
+    Security: Executes with the target process's UID/GID to prevent
+    privilege escalation if the binary is attacker-controlled.
     """
     exe_path = f"/proc/{get_process_nspid(process.pid)}/exe"
 
     def _run_get_version() -> "CompletedProcess[bytes]":
-        return run_process(
-            [exe_path, version_arg], stop_event=stop_event, timeout=get_version_timeout, pdeathsigger=False
+        return run_process_as_target(
+            [exe_path, version_arg],
+            target_process=process,
+            stop_event=stop_event,
+            timeout=get_version_timeout,
+            pdeathsigger=False,
         )
 
     try:

@@ -59,6 +59,7 @@ from gprofiler.exceptions import (
     StopEventSetException,
 )
 from gprofiler.log import get_logger_adapter
+from gprofiler.platform import is_linux as _is_linux_for_priv
 
 logger = get_logger_adapter(__name__)
 
@@ -523,6 +524,68 @@ def cleanup_process_reference(process: Popen) -> None:
         _processes.remove(process)
     except ValueError:
         pass  # Already removed
+
+
+def _make_drop_privileges_fn(uid: int, gid: int) -> Callable[[], None]:
+    """
+    Create a preexec_fn that drops privileges to the specified UID/GID.
+    This runs in the child process before exec().
+    """
+
+    def _drop_privileges() -> None:
+        try:
+            os.setgroups([])  # Drop supplementary groups
+        except OSError:
+            pass  # May fail if not root
+        os.setgid(gid)  # Set GID before UID (can't change GID after dropping root)
+        os.setuid(uid)
+
+    return _drop_privileges
+
+
+def run_process_as_target(
+    cmd: List[str],
+    target_process: Process,
+    stop_event: Optional[Event] = None,
+    timeout: int = 5,
+    **kwargs: Any,
+) -> "CompletedProcess[bytes]":
+    """
+    Execute a command with the same UID/GID as the target process.
+
+    Security: This function drops privileges before executing the command,
+    preventing privilege escalation if the binary is attacker-controlled.
+
+    Args:
+        cmd: Command and arguments to execute
+        target_process: The process whose credentials to use
+        stop_event: Optional event to signal stop
+        timeout: Command timeout in seconds
+        **kwargs: Additional arguments passed to run_process()
+
+    Returns:
+        CompletedProcess with stdout/stderr
+    """
+    preexec_fn: Optional[Callable[[], None]] = None
+
+    # Only drop privileges on Linux when running as root with non-root target
+    if _is_linux_for_priv():
+        target_uids = target_process.uids()
+        target_gids = target_process.gids()
+        # Use real UID/GID (not effective) to match the process owner
+        target_uid = target_uids.real
+        target_gid = target_gids.real
+
+        if os.geteuid() == 0 and target_uid != 0:
+            preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
+
+    return run_process(
+        cmd,
+        stop_event=stop_event,
+        timeout=timeout,
+        preexec_fn=preexec_fn,
+        **kwargs,
+    )
 
 
 def _exit_handler() -> None:
