@@ -533,10 +533,9 @@ def _make_drop_privileges_fn(uid: int, gid: int) -> Callable[[], None]:
     """
 
     def _drop_privileges() -> None:
-        try:
-            os.setgroups([])  # Drop supplementary groups
-        except OSError:
-            pass  # May fail if not root
+        # Drop supplementary groups - this should always succeed when root
+        # Let it raise if it fails, as that would leave groups intact
+        os.setgroups([])
         os.setgid(gid)  # Set GID before UID (can't change GID after dropping root)
         os.setuid(uid)
 
@@ -566,17 +565,22 @@ def run_process_as_target(
     Returns:
         CompletedProcess with stdout/stderr
     """
+    # Remove any user-provided preexec_fn to avoid conflicts
+    # Our security preexec_fn takes precedence
+    kwargs.pop("preexec_fn", None)
+
     preexec_fn: Optional[Callable[[], None]] = None
 
-    # Only drop privileges on Linux when running as root with non-root target
-    if _is_linux_for_priv():
+    # Only drop privileges on Linux when running as root
+    # Check root status first to avoid AccessDenied when non-root targets another user's process
+    if _is_linux_for_priv() and os.geteuid() == 0:
         target_uids = target_process.uids()
         target_gids = target_process.gids()
         # Use real UID/GID (not effective) to match the process owner
         target_uid = target_uids.real
         target_gid = target_gids.real
 
-        if os.geteuid() == 0 and target_uid != 0:
+        if target_uid != 0:
             preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
 
     return run_process(
