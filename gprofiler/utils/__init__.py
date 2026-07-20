@@ -584,7 +584,10 @@ def run_process_as_target(
 
     # Only drop privileges on Linux when running as root and target is non-root
     # Use is_root() which handles user-namespace/container scenarios properly
-    if _is_linux_for_priv() and is_root() and target_uid != 0:
+    # TODO: Temporarily disabled - preexec_fn causes deadlock in multi-threaded process.
+    # Need to implement a wrapper binary (like pdeathsigger) to drop privileges safely.
+    # See: https://docs.python.org/3/library/subprocess.html#subprocess.Popen.preexec_fn
+    if False and _is_linux_for_priv() and is_root() and target_uid != 0:
         preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
 
     return run_process(
