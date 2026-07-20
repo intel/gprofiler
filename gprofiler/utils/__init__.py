@@ -526,22 +526,6 @@ def cleanup_process_reference(process: Popen) -> None:
         pass  # Already removed
 
 
-def _make_drop_privileges_fn(uid: int, gid: int) -> Callable[[], None]:
-    """
-    Create a preexec_fn that drops privileges to the specified UID/GID.
-    This runs in the child process before exec().
-    """
-
-    def _drop_privileges() -> None:
-        # Drop supplementary groups - this should always succeed when root
-        # Let it raise if it fails, as that would leave groups intact
-        os.setgroups([])
-        os.setgid(gid)  # Set GID before UID (can't change GID after dropping root)
-        os.setuid(uid)
-
-    return _drop_privileges
-
-
 def run_process_as_target(
     cmd: List[str],
     target_uid: int,
@@ -560,6 +544,10 @@ def run_process_as_target(
     PID/mount namespaces, since psutil can't look up host PIDs from inside
     a different namespace.
 
+    Uses subprocess's user/group/extra_groups parameters (Python 3.9+) which
+    are implemented in C and avoid the preexec_fn deadlock issues in
+    multi-threaded processes.
+
     Args:
         cmd: Command and arguments to execute
         target_uid: The UID to run the command as
@@ -571,30 +559,29 @@ def run_process_as_target(
     Returns:
         CompletedProcess with stdout/stderr
     """
-    # Remove any user-provided preexec_fn to avoid conflicts
-    # Our security preexec_fn takes precedence
-    kwargs.pop("preexec_fn", None)
+    # Remove any user-provided credential settings to avoid conflicts
+    kwargs.pop("user", None)
+    kwargs.pop("group", None)
+    kwargs.pop("extra_groups", None)
 
     # Create a dummy Event if none provided, so timeouts work
     # (run_process asserts timeout must be None when stop_event is None)
     if stop_event is None:
         stop_event = Event()
 
-    preexec_fn: Optional[Callable[[], None]] = None
-
     # Only drop privileges on Linux when running as root and target is non-root
     # Use is_root() which handles user-namespace/container scenarios properly
-    # TODO: Temporarily disabled - preexec_fn causes deadlock in multi-threaded process.
-    # Need to implement a wrapper binary (like pdeathsigger) to drop privileges safely.
-    # See: https://docs.python.org/3/library/subprocess.html#subprocess.Popen.preexec_fn
-    if False and _is_linux_for_priv() and is_root() and target_uid != 0:
-        preexec_fn = _make_drop_privileges_fn(target_uid, target_gid)
+    if _is_linux_for_priv() and is_root() and target_uid != 0:
+        # Use subprocess's built-in user/group/extra_groups parameters
+        # These are implemented in C and avoid preexec_fn deadlock issues
+        kwargs["user"] = target_uid
+        kwargs["group"] = target_gid
+        kwargs["extra_groups"] = []  # Drop all supplementary groups
 
     return run_process(
         cmd,
         stop_event=stop_event,
         timeout=timeout,
-        preexec_fn=preexec_fn,
         **kwargs,
     )
 
