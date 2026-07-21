@@ -526,12 +526,34 @@ def cleanup_process_reference(process: Popen) -> None:
         pass  # Already removed
 
 
+def get_pdeathsigger_path() -> Optional[str]:
+    """
+    Get the path to the pdeathsigger binary.
+
+    This function should be called BEFORE entering any PID/mount namespaces,
+    as resource_path() may hang when called inside a different namespace.
+
+    Returns:
+        Path to pdeathsigger binary if available, None otherwise.
+    """
+    if not _is_linux_for_priv():
+        return None
+    try:
+        path = resource_path("pdeathsigger")
+        if os.path.exists(path):
+            return path
+    except Exception:
+        pass
+    return None
+
+
 def run_process_as_target(
     cmd: List[str],
     target_uid: int,
     target_gid: int,
     stop_event: Optional[Event] = None,
     timeout: int = 5,
+    pdeathsigger_path: Optional[str] = None,
     **kwargs: Any,
 ) -> "CompletedProcess[bytes]":
     """
@@ -540,13 +562,13 @@ def run_process_as_target(
     Security: This function drops privileges before executing the command,
     preventing privilege escalation if the binary is attacker-controlled.
 
-    Note: Callers must resolve target_uid/target_gid BEFORE entering any
-    PID/mount namespaces, since psutil can't look up host PIDs from inside
-    a different namespace.
+    Note: Callers must resolve target_uid/target_gid and pdeathsigger_path BEFORE
+    entering any PID/mount namespaces, since these lookups may fail or hang
+    inside a different namespace.
 
-    Uses subprocess's user/group/extra_groups parameters (Python 3.9+) which
-    are implemented in C and avoid the preexec_fn deadlock issues in
-    multi-threaded processes.
+    Uses the 'pdeathsigger' wrapper binary with -u/-g flags to drop privileges
+    before exec, avoiding preexec_fn deadlock issues in multi-threaded processes
+    and compatibility issues with container environments.
 
     Args:
         cmd: Command and arguments to execute
@@ -554,16 +576,13 @@ def run_process_as_target(
         target_gid: The GID to run the command as
         stop_event: Optional event to signal stop (created internally if None)
         timeout: Command timeout in seconds (default: 5)
+        pdeathsigger_path: Path to pdeathsigger binary (from get_pdeathsigger_path(),
+                          resolved before namespace entry)
         **kwargs: Additional arguments passed to run_process()
 
     Returns:
         CompletedProcess with stdout/stderr
     """
-    # Remove any user-provided credential settings to avoid conflicts
-    kwargs.pop("user", None)
-    kwargs.pop("group", None)
-    kwargs.pop("extra_groups", None)
-
     # Create a dummy Event if none provided, so timeouts work
     # (run_process asserts timeout must be None when stop_event is None)
     if stop_event is None:
@@ -571,12 +590,18 @@ def run_process_as_target(
 
     # Only drop privileges on Linux when running as root and target is non-root
     # Use is_root() which handles user-namespace/container scenarios properly
-    if _is_linux_for_priv() and is_root() and target_uid != 0:
-        # Use subprocess's built-in user/group/extra_groups parameters
-        # These are implemented in C and avoid preexec_fn deadlock issues
-        kwargs["user"] = target_uid
-        kwargs["group"] = target_gid
-        kwargs["extra_groups"] = []  # Drop all supplementary groups
+    if _is_linux_for_priv() and is_root() and target_uid != 0 and pdeathsigger_path is not None:
+        # Use pdeathsigger wrapper with -u/-g flags to drop privileges before exec
+        # This avoids preexec_fn deadlock and subprocess user/group param issues
+        logger.debug(
+            "Using pdeathsigger for privilege dropping",
+            pdeathsigger_path=pdeathsigger_path,
+            target_uid=target_uid,
+            target_gid=target_gid,
+        )
+        cmd = [pdeathsigger_path, "-u", str(target_uid), "-g", str(target_gid)] + cmd
+        # Disable pdeathsigger in run_process since we're already using it
+        kwargs["pdeathsigger"] = False
 
     return run_process(
         cmd,

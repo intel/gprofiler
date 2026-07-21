@@ -19,7 +19,7 @@ from threading import Event
 from granulate_utils.linux.ns import get_process_nspid, run_in_ns_wrapper
 from psutil import NoSuchProcess, Process
 
-from gprofiler.utils import run_process_as_target
+from gprofiler.utils import get_pdeathsigger_path, run_process_as_target
 
 
 def get_exe_version(
@@ -37,9 +37,11 @@ def get_exe_version(
     """
     exe_path = f"/proc/{get_process_nspid(process.pid)}/exe"
 
-    # Get credentials BEFORE entering namespace (psutil can't resolve host PIDs inside namespace)
+    # Get credentials and pdeathsigger path BEFORE entering namespace
+    # (psutil can't resolve host PIDs inside namespace, and resource_path may hang)
     target_uid = process.uids().real
     target_gid = process.gids().real
+    pdeathsigger_path = get_pdeathsigger_path()
 
     def _run_get_version() -> "CompletedProcess[bytes]":
         return run_process_as_target(
@@ -48,7 +50,7 @@ def get_exe_version(
             target_gid=target_gid,
             stop_event=stop_event,
             timeout=get_version_timeout,
-            pdeathsigger=False,
+            pdeathsigger_path=pdeathsigger_path,
         )
 
     try:
