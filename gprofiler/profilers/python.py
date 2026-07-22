@@ -62,7 +62,6 @@ if is_linux():
     from gprofiler.profilers.python_ebpf import PythonEbpfProfiler, PythonEbpfError
 
 from gprofiler.utils import (
-    get_pdeathsigger_path,
     pgrep_exe,
     pgrep_maps,
     random_prefix,
@@ -153,11 +152,10 @@ class PythonMetadata(ApplicationMetadata):
 
             python_path = f"/proc/{get_process_nspid(process.pid)}/exe"
 
-            # Get credentials and pdeathsigger path BEFORE entering namespace
-            # (psutil can't resolve host PIDs inside namespace, and resource_path may hang)
+            # Get credentials BEFORE entering namespace
+            # (psutil can't resolve host PIDs inside namespace)
             target_uid = process.uids().real
             target_gid = process.gids().real
-            pdeathsigger_path = get_pdeathsigger_path()
 
             def _run_python_process_in_ns() -> "CompletedProcess[bytes]":
                 return run_process_as_target(
@@ -166,7 +164,6 @@ class PythonMetadata(ApplicationMetadata):
                     target_gid=target_gid,
                     stop_event=self._stop_event,
                     timeout=self._PYTHON_TIMEOUT,
-                    pdeathsigger_path=pdeathsigger_path,
                 )
 
             result = cast(CompletedProcess, run_in_ns_wrapper(["pid", "mnt"], _run_python_process_in_ns, process.pid))

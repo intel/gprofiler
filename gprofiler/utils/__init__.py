@@ -526,34 +526,12 @@ def cleanup_process_reference(process: Popen) -> None:
         pass  # Already removed
 
 
-def get_pdeathsigger_path() -> Optional[str]:
-    """
-    Get the path to the pdeathsigger binary.
-
-    This function should be called BEFORE entering any PID/mount namespaces,
-    as resource_path() may hang when called inside a different namespace.
-
-    Returns:
-        Path to pdeathsigger binary if available, None otherwise.
-    """
-    if not _is_linux_for_priv():
-        return None
-    try:
-        path = resource_path("pdeathsigger")
-        if os.path.exists(path):
-            return path
-    except Exception:
-        pass
-    return None
-
-
 def run_process_as_target(
     cmd: List[str],
     target_uid: int,
     target_gid: int,
     stop_event: Optional[Event] = None,
     timeout: int = 5,
-    pdeathsigger_path: Optional[str] = None,
     **kwargs: Any,
 ) -> "CompletedProcess[bytes]":
     """
@@ -562,13 +540,11 @@ def run_process_as_target(
     Security: This function drops privileges before executing the command,
     preventing privilege escalation if the binary is attacker-controlled.
 
-    Note: Callers must resolve target_uid/target_gid and pdeathsigger_path BEFORE
-    entering any PID/mount namespaces, since these lookups may fail or hang
-    inside a different namespace.
+    Note: Callers must resolve target_uid/target_gid BEFORE entering any
+    PID/mount namespaces, since these lookups may fail inside a different namespace.
 
-    Uses the 'pdeathsigger' wrapper binary with -u/-g flags to drop privileges
-    before exec, avoiding preexec_fn deadlock issues in multi-threaded processes
-    and compatibility issues with container environments.
+    Uses subprocess user/group parameters which handle privilege dropping in
+    the child process after fork (implemented in C, no preexec_fn deadlock risk).
 
     Args:
         cmd: Command and arguments to execute
@@ -576,8 +552,6 @@ def run_process_as_target(
         target_gid: The GID to run the command as
         stop_event: Optional event to signal stop (created internally if None)
         timeout: Command timeout in seconds (default: 5)
-        pdeathsigger_path: Path to pdeathsigger binary (from get_pdeathsigger_path(),
-                          resolved before namespace entry)
         **kwargs: Additional arguments passed to run_process()
 
     Returns:
@@ -588,21 +562,37 @@ def run_process_as_target(
     if stop_event is None:
         stop_event = Event()
 
+    # Always disable pdeathsigger wrapper when running as target
+    # This function is called inside target namespaces where pdeathsigger may not exist
+    kwargs["pdeathsigger"] = False
+
     # Only drop privileges on Linux when running as root and target is non-root
     # Use is_root() which handles user-namespace/container scenarios properly
-    if _is_linux_for_priv() and is_root() and target_uid != 0 and pdeathsigger_path is not None:
-        # Use pdeathsigger wrapper with -u/-g flags to drop privileges before exec
-        # This avoids preexec_fn deadlock and subprocess user/group param issues
-        logger.debug(
-            "Using pdeathsigger for privilege dropping",
-            pdeathsigger_path=pdeathsigger_path,
-            target_uid=target_uid,
-            target_gid=target_gid,
-        )
-        cmd = [pdeathsigger_path, "-u", str(target_uid), "-g", str(target_gid)] + cmd
-        # Disable pdeathsigger in run_process since we're already using it
-        kwargs["pdeathsigger"] = False
+    should_drop = _is_linux_for_priv() and is_root() and target_uid != 0
+    logger.debug(
+        "run_process_as_target called",
+        cmd=cmd,
+        target_uid=target_uid,
+        target_gid=target_gid,
+        is_linux=_is_linux_for_priv(),
+        is_root=is_root(),
+        should_drop_privileges=should_drop,
+    )
 
+    if should_drop:
+        # Use subprocess user/group params for privilege dropping
+        # This is handled in C code after fork(), before exec() - no deadlock risk
+        # and works inside any namespace (no external binary needed)
+        kwargs["user"] = target_uid
+        kwargs["group"] = target_gid
+        kwargs["extra_groups"] = []
+        logger.debug(
+            "Privilege dropping enabled",
+            user=kwargs["user"],
+            group=kwargs["group"],
+        )
+
+    logger.debug("Calling run_process", cmd=cmd, timeout=timeout)
     return run_process(
         cmd,
         stop_event=stop_event,
