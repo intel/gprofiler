@@ -57,9 +57,11 @@ def safe_copy(src: str, dst: str) -> None:
     # This closes TOCTOU race between the check above and the open
     fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     try:
-        with open(src, "rb") as src_file:
-            with os.fdopen(fd, "wb") as dst_file:
-                shutil.copyfileobj(src_file, dst_file)
+        # Wrap fd first to prevent leak if open(src) fails
+        with os.fdopen(fd, "wb") as dst_file, open(src, "rb") as src_file:
+            shutil.copyfileobj(src_file, dst_file)
+        # Preserve source file permissions (e.g., executable bit)
+        shutil.copymode(src, dst_tmp)
     except Exception:
         try:
             os.unlink(dst_tmp)
@@ -85,7 +87,7 @@ def safe_read_text(path: str) -> str:
         raise Exception(f"Refusing to read {path}: path is a symlink")
 
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError as e:
         if e.errno == errno.ELOOP:
             raise Exception(f"Refusing to read {path}: path is a symlink")
