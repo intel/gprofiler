@@ -17,6 +17,7 @@
 import errno
 import os
 import shutil
+import stat
 from pathlib import Path
 from secrets import token_hex
 from typing import Union
@@ -27,14 +28,71 @@ from gprofiler.platform import is_windows
 from gprofiler.utils import remove_path, run_process
 
 
+def _is_symlink_lstat(path: str) -> bool:
+    """Check if path is a symlink without following it."""
+    try:
+        return stat.S_ISLNK(os.lstat(path).st_mode)
+    except FileNotFoundError:
+        return False
+
+
 def safe_copy(src: str, dst: str) -> None:
     """
     Safely copies 'src' to 'dst'. Safely means that writing 'dst' is performed at a temporary location,
     and the file is then moved, making the filesystem-level change atomic.
+
+    Security: Uses O_EXCL to atomically create the temp file, preventing symlink attacks where an
+    attacker plants a symlink to redirect writes to arbitrary locations.
     """
     dst_tmp = f"{dst}.tmp"
-    shutil.copy(src, dst_tmp)
+
+    # Remove existing tmp file if it's a regular file (from interrupted previous copy)
+    # If it's a symlink, refuse to proceed
+    if os.path.lexists(dst_tmp):
+        if _is_symlink_lstat(dst_tmp):
+            raise Exception(f"Refusing to copy to {dst_tmp}: path is a symlink")
+        os.unlink(dst_tmp)
+
+    # O_EXCL ensures atomic creation - fails if anything exists at path (including symlinks)
+    # This closes TOCTOU race between the check above and the open
+    fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with open(src, "rb") as src_file:
+            with os.fdopen(fd, "wb") as dst_file:
+                shutil.copyfileobj(src_file, dst_file)
+    except Exception:
+        try:
+            os.unlink(dst_tmp)
+        except OSError:
+            pass
+        raise
+
+    # Check dst is not a symlink before final rename
+    if _is_symlink_lstat(dst):
+        os.unlink(dst_tmp)
+        raise Exception(f"Refusing to rename to {dst}: path is a symlink")
+
     os.rename(dst_tmp, dst)
+
+
+def safe_read_text(path: str) -> str:
+    """
+    Safely read text from a file, refusing to follow symlinks.
+
+    Raises if path is a symlink.
+    """
+    if _is_symlink_lstat(path):
+        raise Exception(f"Refusing to read {path}: path is a symlink")
+
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise Exception(f"Refusing to read {path}: path is a symlink")
+        raise
+
+    with os.fdopen(fd, "r") as f:
+        return f.read()
 
 
 def is_rw_exec_dir(path: Path) -> bool:
