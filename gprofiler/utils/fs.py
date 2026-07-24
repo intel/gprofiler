@@ -53,9 +53,15 @@ def safe_copy(src: str, dst: str) -> None:
             raise Exception(f"Refusing to copy to {dst_tmp}: path is a symlink")
         os.unlink(dst_tmp)
 
-    # O_EXCL ensures atomic creation - fails if anything exists at path (including symlinks)
-    # This closes TOCTOU race between the check above and the open
-    fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    # O_EXCL ensures atomic creation - fails if anything exists at path (including symlinks).
+    # This closes TOCTOU race between the check above and the open.
+    # EEXIST means another process created the file after our delete - indicates a race or attack.
+    try:
+        fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise Exception(
+            f"Refusing to copy: {dst_tmp} was created unexpectedly (possible race condition or symlink attack)"
+        )
     try:
         dst_file = os.fdopen(fd, "wb")
     except Exception:
@@ -95,6 +101,9 @@ def safe_read_text(path: str) -> str:
         raise Exception(f"Refusing to read {path}: path is a symlink")
 
     try:
+        # O_NOFOLLOW makes open() fail with ELOOP if the path is a symlink (Linux-specific behaviour).
+        # On platforms without O_NOFOLLOW (e.g. Windows), we fall back to 0 and rely solely on the
+        # lstat check above.  The target platform for this code is Linux, so O_NOFOLLOW is always set.
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError as e:
         if e.errno == errno.ELOOP:
