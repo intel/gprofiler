@@ -95,15 +95,17 @@ def safe_read_text(path: str) -> str:
     """
     Safely read text from a file, refusing to follow symlinks.
 
+    Uses O_NOFOLLOW so the kernel rejects symlinks atomically at open time (Linux).
+    On platforms without O_NOFOLLOW the flag falls back to 0 and the protection
+    is best-effort; the target platform for this code is Linux where O_NOFOLLOW
+    is always available.
+
     Raises if path is a symlink.
     """
-    if _is_symlink_lstat(path):
-        raise Exception(f"Refusing to read {path}: path is a symlink")
-
     try:
-        # O_NOFOLLOW makes open() fail with ELOOP if the path is a symlink (Linux-specific behaviour).
-        # On platforms without O_NOFOLLOW (e.g. Windows), we fall back to 0 and rely solely on the
-        # lstat check above.  The target platform for this code is Linux, so O_NOFOLLOW is always set.
+        # O_NOFOLLOW makes open() fail with ELOOP if the path is a symlink (Linux-specific behavior).
+        # On platforms without O_NOFOLLOW the flag is 0 and the call may follow symlinks; the target
+        # platform for this code is Linux, so O_NOFOLLOW is always available.
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError as e:
         if e.errno == errno.ELOOP:
