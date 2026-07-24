@@ -98,7 +98,7 @@ from gprofiler.utils import (
     touch_path,
     wait_event,
 )
-from gprofiler.utils.fs import is_owned_by_root, is_rw_exec_dir, mkdir_owned_root, safe_copy
+from gprofiler.utils.fs import is_owned_by_root, is_rw_exec_dir, mkdir_owned_root, safe_copy, safe_read_text
 from gprofiler.utils.perf import can_i_use_perf_events
 from gprofiler.utils.process import process_comm, search_proc_maps
 
@@ -769,11 +769,10 @@ class AsyncProfiledProcess:
         if not os.path.exists(self._log_path_host):
             return "(log file doesn't exist)"
 
-        log = Path(self._log_path_host)
-        ap_log = log.read_text()
+        ap_log = safe_read_text(self._log_path_host)
         # clean immediately so we don't mix log messages from multiple invocations.
         # this is also what AP's profiler.sh does.
-        log.unlink()
+        Path(self._log_path_host).unlink()
         self._recreate_log()
         return ap_log
 
