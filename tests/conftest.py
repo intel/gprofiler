@@ -432,10 +432,13 @@ def application_docker_image(
             docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)]
         )
     except docker.errors.BuildError as e:
-        # Skip tests when Docker image build fails due to network issues (e.g., unavailable package repositories).
+        # Skip tests when Docker image build fails due to network issues (e.g., unavailable package
+        # repositories).  The APT "Failed to fetch" / "Some index files failed to download" messages
+        # appear in the build log stream entries, not in the top-level error reason.
         # This prevents transient network failures from turning into hard CI failures.
-        error_str = str(e)
-        if "Failed to fetch" in error_str or "Some index files failed to download" in error_str:
+        network_error_markers = ("Failed to fetch", "Some index files failed to download")
+        build_log_text = " ".join(str(entry) for entry in e.build_log)
+        if any(marker in build_log_text for marker in network_error_markers):
             pytest.skip(f"Skipping: Docker image build failed due to unavailable package repository: {e}")
         raise
     yield image

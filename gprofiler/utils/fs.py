@@ -57,7 +57,7 @@ def safe_copy(src: str, dst: str) -> None:
     try:
         st = os.lstat(dst_tmp)
         if stat.S_ISLNK(st.st_mode):
-            raise Exception(f"Refusing to copy to {dst_tmp}: path is a symlink")
+            raise Exception(f"Refusing to copy: temporary path {dst_tmp} is a symlink (possible attack)")
         os.unlink(dst_tmp)
     except FileNotFoundError:
         pass  # Normal case: no leftover file
@@ -98,7 +98,7 @@ def safe_copy(src: str, dst: str) -> None:
     # would be replaced rather than its target being overwritten.  This check adds defence-in-depth.
     if _is_symlink_lstat(dst):
         os.unlink(dst_tmp)
-        raise Exception(f"Refusing to rename to {dst}: path is a symlink")
+        raise Exception(f"Refusing to copy: destination {dst} is a symlink (security restriction)")
 
     os.rename(dst_tmp, dst)
 
@@ -121,7 +121,7 @@ def safe_read_text(path: str) -> str:
         fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW)
     except OSError as e:
         if e.errno == errno.ELOOP:
-            raise Exception(f"Refusing to read {path}: path is a symlink")
+            raise Exception(f"Refusing to read {path}: symlinks are not allowed for security reasons")
         raise
 
     try:
