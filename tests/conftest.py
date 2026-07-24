@@ -427,7 +427,17 @@ def application_docker_image(
                 )
             if application_image_tag == "musl":
                 pytest.xfail("This test does not work on aarch64 https://github.com/intel/gprofiler/issues/743")
-    image = build_image(docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)])
+    try:
+        image = build_image(
+            docker_client, **application_docker_image_configs[image_name(runtime, application_image_tag)]
+        )
+    except docker.errors.BuildError as e:
+        # Skip tests when Docker image build fails due to network issues (e.g., unavailable package repositories).
+        # This prevents transient network failures from turning into hard CI failures.
+        error_str = str(e)
+        if "Failed to fetch" in error_str or "Some index files failed to download" in error_str:
+            pytest.skip(f"Skipping: Docker image build failed due to unavailable package repository: {e}")
+        raise
     yield image
 
     # Clean up the test image after test completes to free disk space for subsequent tests
