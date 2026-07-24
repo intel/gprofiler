@@ -27,6 +27,11 @@ from granulate_utils.linux.ns import is_root
 from gprofiler.platform import is_windows
 from gprofiler.utils import remove_path, run_process
 
+# O_NOFOLLOW is always available on Linux (the target platform for this code).
+# The getattr fallback to 0 covers non-Linux builds; on those platforms symlink
+# protection in safe_read_text() is best-effort only.
+_O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
+
 
 def _is_symlink_lstat(path: str) -> bool:
     """Check if path is a symlink without following it."""
@@ -46,12 +51,16 @@ def safe_copy(src: str, dst: str) -> None:
     """
     dst_tmp = f"{dst}.tmp"
 
-    # Remove existing tmp file if it's a regular file (from interrupted previous copy)
-    # If it's a symlink, refuse to proceed
-    if os.path.lexists(dst_tmp):
-        if _is_symlink_lstat(dst_tmp):
+    # Remove any leftover tmp file from a previous interrupted copy (regular files only).
+    # Refuse if the path is a symlink to prevent redirecting writes via a pre-planted symlink.
+    # O_EXCL below closes the TOCTOU race between this cleanup and the open.
+    try:
+        st = os.lstat(dst_tmp)
+        if stat.S_ISLNK(st.st_mode):
             raise Exception(f"Refusing to copy to {dst_tmp}: path is a symlink")
         os.unlink(dst_tmp)
+    except FileNotFoundError:
+        pass  # Normal case: no leftover file
 
     # O_EXCL ensures atomic creation - fails if anything exists at path (including symlinks).
     # This closes TOCTOU race between the check above and the open.
@@ -83,7 +92,10 @@ def safe_copy(src: str, dst: str) -> None:
             pass
         raise
 
-    # Check dst is not a symlink before final rename
+    # Best-effort check: refuse if dst is currently a symlink.
+    # os.rename() replaces the destination atomically (it does not follow dst symlinks), so even
+    # if an attacker races to plant a symlink between this check and the rename, the symlink itself
+    # would be replaced rather than its target being overwritten.  This check adds defence-in-depth.
     if _is_symlink_lstat(dst):
         os.unlink(dst_tmp)
         raise Exception(f"Refusing to rename to {dst}: path is a symlink")
@@ -106,7 +118,7 @@ def safe_read_text(path: str) -> str:
         # O_NOFOLLOW makes open() fail with ELOOP if the path is a symlink (Linux-specific behavior).
         # On platforms without O_NOFOLLOW the flag is 0 and the call may follow symlinks; the target
         # platform for this code is Linux, so O_NOFOLLOW is always available.
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW)
     except OSError as e:
         if e.errno == errno.ELOOP:
             raise Exception(f"Refusing to read {path}: path is a symlink")
