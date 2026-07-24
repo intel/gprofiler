@@ -51,19 +51,15 @@ def safe_copy(src: str, dst: str) -> None:
     """
     dst_tmp = f"{dst}.tmp"
 
-    # Remove any leftover tmp file from a previous interrupted copy (regular files only).
-    # Refuse if the path is a symlink to prevent redirecting writes via a pre-planted symlink.
-    # O_EXCL below closes the TOCTOU race between this cleanup and the open.
+    # Remove any leftover tmp file from a previous interrupted copy.
+    # unlink() removes symlinks themselves (not their targets), so this is safe even if dst_tmp
+    # is a symlink; the subsequent O_EXCL open then creates the file fresh.
     try:
-        st = os.lstat(dst_tmp)
-        if stat.S_ISLNK(st.st_mode):
-            raise Exception(f"Refusing to copy: temporary path {dst_tmp} is a symlink (possible attack)")
         os.unlink(dst_tmp)
     except FileNotFoundError:
         pass  # Normal case: no leftover file
 
-    # O_EXCL ensures atomic creation - fails if anything exists at path (including symlinks).
-    # This closes TOCTOU race between the check above and the open.
+    # O_EXCL ensures atomic creation - fails if anything exists at dst_tmp (including symlinks).
     # EEXIST means another process created the file after our delete - indicates a race or attack.
     try:
         fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
