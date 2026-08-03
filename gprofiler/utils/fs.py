@@ -17,6 +17,7 @@
 import errno
 import os
 import shutil
+import stat
 from pathlib import Path
 from secrets import token_hex
 from typing import Union
@@ -26,15 +27,106 @@ from granulate_utils.linux.ns import is_root
 from gprofiler.platform import is_windows
 from gprofiler.utils import remove_path, run_process
 
+# O_NOFOLLOW is always available on Linux (the target platform for this code).
+# The getattr fallback to 0 covers non-Linux builds; on those platforms symlink
+# protection in safe_read_text() is best-effort only.
+_O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
+
+
+def _is_symlink_lstat(path: str) -> bool:
+    """Check if path is a symlink without following it."""
+    try:
+        return stat.S_ISLNK(os.lstat(path).st_mode)
+    except FileNotFoundError:
+        return False
+
 
 def safe_copy(src: str, dst: str) -> None:
     """
     Safely copies 'src' to 'dst'. Safely means that writing 'dst' is performed at a temporary location,
     and the file is then moved, making the filesystem-level change atomic.
+
+    Security: Uses O_EXCL to atomically create the temp file, preventing symlink attacks where an
+    attacker plants a symlink to redirect writes to arbitrary locations.
     """
     dst_tmp = f"{dst}.tmp"
-    shutil.copy(src, dst_tmp)
+
+    # Remove any leftover tmp file from a previous interrupted copy.
+    # unlink() removes symlinks themselves (not their targets), so this is safe even if dst_tmp
+    # is a symlink; the subsequent O_EXCL open then creates the file fresh.
+    try:
+        os.unlink(dst_tmp)
+    except FileNotFoundError:
+        pass  # Normal case: no leftover file
+
+    # O_EXCL ensures atomic creation - fails if anything exists at dst_tmp (including symlinks).
+    # EEXIST means another process created the file after our delete - indicates a race or attack.
+    try:
+        fd = os.open(dst_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise Exception(
+            f"Refusing to copy: {dst_tmp} was created unexpectedly (possible race condition or symlink attack)"
+        )
+    try:
+        dst_file = os.fdopen(fd, "wb")
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(dst_tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        with dst_file, open(src, "rb") as src_file:
+            shutil.copyfileobj(src_file, dst_file)
+        # Preserve source file permissions (e.g., executable bit)
+        shutil.copymode(src, dst_tmp)
+    except Exception:
+        try:
+            os.unlink(dst_tmp)
+        except OSError:
+            pass
+        raise
+
+    # Best-effort check: refuse if dst is currently a symlink.
+    # os.rename() replaces the destination atomically (it does not follow dst symlinks), so even
+    # if an attacker races to plant a symlink between this check and the rename, the symlink itself
+    # would be replaced rather than its target being overwritten.  This check adds defence-in-depth.
+    if _is_symlink_lstat(dst):
+        os.unlink(dst_tmp)
+        raise Exception(f"Refusing to copy: destination {dst} is a symlink (security restriction)")
+
     os.rename(dst_tmp, dst)
+
+
+def safe_read_text(path: str) -> str:
+    """
+    Safely read text from a file, refusing to follow symlinks.
+
+    Uses O_NOFOLLOW so the kernel rejects symlinks atomically at open time (Linux).
+    On platforms without O_NOFOLLOW the flag falls back to 0 and the protection
+    is best-effort; the target platform for this code is Linux where O_NOFOLLOW
+    is always available.
+
+    Raises if path is a symlink.
+    """
+    try:
+        # O_NOFOLLOW makes open() fail with ELOOP if the path is a symlink (Linux-specific behavior).
+        # On platforms without O_NOFOLLOW the flag is 0 and the call may follow symlinks; the target
+        # platform for this code is Linux, so O_NOFOLLOW is always available.
+        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise Exception(f"Refusing to read {path}: symlinks are not allowed for security reasons")
+        raise
+
+    try:
+        f = os.fdopen(fd, "r")
+    except Exception:
+        os.close(fd)
+        raise
+    with f:
+        return f.read()
 
 
 def is_rw_exec_dir(path: Path) -> bool:
