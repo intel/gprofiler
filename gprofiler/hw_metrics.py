@@ -93,6 +93,7 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
             str(self._perfspect_duration),
             "--output",
             PERFSPECT_DATA_DIRECTORY,
+            "--noroot",
         ]
 
         # Add --debug if verbose is enabled
