@@ -15,25 +15,31 @@
 #
 import concurrent.futures
 import datetime
+import json
 import logging
 import logging.config
 import logging.handlers
 import os
+import re
 import shutil
+import socket
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
 from threading import Event
 from types import TracebackType
-from typing import Iterable, List, Optional, Type, cast
+from typing import Any, Dict, Iterable, List, Optional, Type, cast
 
 import configargparse
 import humanfriendly
+import psutil
+import requests
 from granulate_utils.linux.ns import is_root, is_running_in_init_pid
 from granulate_utils.linux.process import is_process_running
 from granulate_utils.metadata.cloud import get_aws_execution_env
-from psutil import NoSuchProcess, Process, process_iter
+from psutil import NoSuchProcess, Process
 from requests import RequestException, Timeout
 
 from gprofiler import __version__
@@ -48,9 +54,16 @@ from gprofiler.containers_client import ContainerNamesClient
 from gprofiler.diagnostics import log_diagnostics, set_diagnostics
 from gprofiler.dynamic_profiling_management.heartbeat import DynamicGProfilerManager, HeartbeatClient
 from gprofiler.exceptions import APIError, NoProfilersEnabledError
-from gprofiler.gprofiler_types import ProcessToProfileData, UserArgs, integers_list, positive_integer
+from gprofiler.gprofiler_types import (
+    ProcessToProfileData,
+    UserArgs,
+    comma_separated_list,
+    integers_list,
+    positive_integer,
+)
 from gprofiler.hw_metrics import HWMetricsMonitor, HWMetricsMonitorBase, NoopHWMetricsMonitor
 from gprofiler.log import RemoteLogsHandler, initial_root_logger_setup
+from gprofiler.memory_manager import MemoryManager
 from gprofiler.merge import concatenate_from_external_file, concatenate_profiles, merge_profiles
 from gprofiler.metadata import ProfileMetadata
 from gprofiler.metadata.application_identifiers import ApplicationIdentifiers
@@ -58,10 +71,31 @@ from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.external_metadata import ExternalMetadataStaleError, read_external_metadata
 from gprofiler.metadata.metadata_collector import get_current_metadata, get_static_metadata
 from gprofiler.metadata.system_metadata import get_hostname, get_run_mode, get_static_system_info
+from gprofiler.metrics_publisher import (
+    COMPONENT_API_CLIENT,
+    COMPONENT_GPROFILER_MAIN,
+    COMPONENT_SYSTEM_PROFILER,
+    ERROR_CATEGORY_UPLOAD_API_ERROR,
+    ERROR_CATEGORY_UPLOAD_REQUEST_EXCEPTION,
+    ERROR_CATEGORY_UPLOAD_TIMEOUT,
+    ERROR_MSG_PERF_FAILURE,
+    ERROR_MSG_PROCESS_PROFILER_FAILURE,
+    ERROR_MSG_PROFILING_RUN_FAILURE,
+    ERROR_MSG_UPLOAD_ERROR,
+    ERROR_TYPE_PERF_FAILURE,
+    ERROR_TYPE_PROCESS_PROFILER_FAILURE,
+    ERROR_TYPE_PROFILING_RUN_FAILURE,
+    ERROR_TYPE_UPLOAD_ERROR,
+    METRIC_BASE_NAME,
+    SEVERITY_CRITICAL,
+    SEVERITY_ERROR,
+    SEVERITY_WARNING,
+    MetricsPublisher,
+    get_current_method_name,
+)
 from gprofiler.platform import is_aarch64, is_linux, is_windows
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.factory import get_profilers
-from gprofiler.profilers.perf import SystemProfiler
 from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase, ProfilerInterface
 from gprofiler.profilers.registry import get_profilers_registry
 from gprofiler.state import State, init_state
@@ -128,7 +162,6 @@ class GProfiler:
         heartbeat_file_path: Optional[Path] = None,
         perfspect_path: Optional[Path] = None,
         perfspect_duration: int = 60,
-        verbose: bool = False,
     ):
         self._output_dir = output_dir
         self._flamegraph = flamegraph
@@ -154,7 +187,10 @@ class GProfiler:
         self._perfspect_duration = perfspect_duration
         if self._collect_metadata:
             self._static_metadata = get_static_metadata(self._spawn_time, user_args, self._external_metadata_path)
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+
+        # Minimize thread pool size for memory efficiency - snapshots taking >120s suggest I/O bottlenecks
+        # When profiling is slow, fewer threads = less memory overhead + less contention
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         # TODO: we actually need 2 types of temporary directories.
         # 1. accessible by everyone - for profilers that run code in target processes, like async-profiler
         # 2. accessible only by us.
@@ -169,10 +205,8 @@ class GProfiler:
             profiling_mode=profiling_mode,
             container_names_client=container_names_client,
             processes_to_profile=processes_to_profile,
-            max_processes_per_profiler=int(user_args.get("max_processes_per_profiler", 0) or 0),
-            max_system_processes_for_system_profilers=int(
-                user_args.get("max_system_processes_for_system_profilers", 0) or 0
-            ),
+            max_processes_per_profiler=user_args.get("max_processes_per_profiler", 0),
+            max_system_processes_for_system_profilers=user_args.get("max_system_processes_for_system_profilers", 0),
         )
         self.system_profiler, self.process_profilers = get_profilers(user_args, profiler_state=self._profiler_state)
         self._usage_logger = usage_logger
@@ -189,10 +223,14 @@ class GProfiler:
                 self._profiler_state.stop_event,
                 perfspect_path=self._perfspect_path,
                 perfspect_duration=self._perfspect_duration,
-                verbose=verbose,
             )
         else:
             self._hw_metrics_monitor = NoopHWMetricsMonitor()
+
+        # Initialize minimal memory manager for subprocess cleanup
+        self._memory_management_enabled = user_args.get("memory_management_enabled")
+        self._memory_cleanup_threshold_mb = user_args.get("memory_cleanup_threshold_mb")
+        self._memory_manager = MemoryManager()
 
         if isinstance(self.system_profiler, NoopProfiler) and not self.process_profilers:
             raise NoProfilersEnabledError()
@@ -314,7 +352,7 @@ class GProfiler:
         skip_system_profilers = False
         if self._profiler_state.max_system_processes_for_system_profilers > 0:
             try:
-                total_processes = len(list(process_iter()))
+                total_processes = len(list(psutil.process_iter()))
                 if total_processes > self._profiler_state.max_system_processes_for_system_profilers:
                     skip_system_profilers = True
                     logger.warning(
@@ -324,22 +362,28 @@ class GProfiler:
                     )
                 else:
                     logger.debug(
-                        f"System process count: {total_processes} "
-                        f"(threshold: {self._profiler_state.max_system_processes_for_system_profilers})"
+                        f"System process count: {total_processes} (threshold: {self._profiler_state.max_system_processes_for_system_profilers})"
                     )
             except Exception as e:
                 logger.warning(f"Could not count system processes, continuing with all profilers: {e}")
 
         for prof in list(self.all_profilers):
             try:
-                # Skip system profilers if threshold exceeded
-                if (
-                    skip_system_profilers
-                    and hasattr(prof, "_is_system_wide_profiler")
-                    and prof._is_system_wide_profiler()
-                ):
-                    logger.info(f"Skipping {prof.__class__.__name__} due to high system process count")
-                    continue
+                # Skip system profilers if threshold exceeded, unless they override the logic
+                if skip_system_profilers and hasattr(prof, "_is_system_profiler") and prof._is_system_profiler:
+                    # Check if the profiler has custom logic for system threshold skipping
+                    if hasattr(prof, "should_skip_due_to_system_threshold"):
+                        should_skip = prof.should_skip_due_to_system_threshold()
+                    else:
+                        should_skip = True
+
+                    if should_skip:
+                        logger.info(f"Skipping {prof.__class__.__name__} due to high system process count")
+                        continue
+                    else:
+                        logger.info(
+                            f"Not skipping {prof.__class__.__name__} despite high system process count (cgroup-based profiling requested)"
+                        )
 
                 prof.start()
             except Exception:
@@ -355,10 +399,26 @@ class GProfiler:
     def stop(self) -> None:
         logger.info("Stopping ...")
         self._profiler_state.stop_event.set()
-        self._system_metrics_monitor.stop()
-        self._hw_metrics_monitor.stop()
+
+        # Stop system metrics monitor with exception protection
+        try:
+            self._system_metrics_monitor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping system metrics monitor: {e}")
+
+        # Stop hardware metrics monitor with exception protection
+        try:
+            self._hw_metrics_monitor.stop()
+        except Exception as e:
+            logger.error(f"Error stopping hardware metrics monitor: {e}")
+
+        # Stop all profilers with individual exception protection
         for prof in self.all_profilers:
-            prof.stop()
+            try:
+                prof.stop()
+                logger.debug(f"Successfully stopped profiler: {prof.name}")
+            except Exception as e:
+                logger.error(f"Error stopping profiler {prof.name}: {e}")
 
     def _snapshot(self) -> None:
         local_start_time = datetime.datetime.utcnow()
@@ -375,10 +435,22 @@ class GProfiler:
         for future in concurrent.futures.as_completed(process_profilers_futures):
             # if either of these fail - log it, and continue.
             try:
-                process_profiles.update(future.result())
+                result = future.result()
+                process_profiles.update(result)
             except Exception:
                 future_name = future.name  # type: ignore # hack, add the profiler's name to the Future object
                 logger.exception(f"{future_name} profiling failed")
+                # Report profiler failure to metrics server using singleton
+                MetricsPublisher.get_instance().send_error_metric(
+                    error_type=ERROR_TYPE_PROCESS_PROFILER_FAILURE,
+                    error_message=ERROR_MSG_PROCESS_PROFILER_FAILURE,
+                    category=f"profiler_{future_name}",
+                    severity=SEVERITY_ERROR,
+                    extra_tags={
+                        "method_name": get_current_method_name(),
+                        "profiler_name": future_name,
+                    },
+                )
 
         local_end_time = local_start_time + datetime.timedelta(seconds=(time.monotonic() - monotonic_start_time))
 
@@ -388,6 +460,16 @@ class GProfiler:
             logger.critical(
                 "Running perf failed; consider running gProfiler with '--perf-mode disabled' to avoid using perf",
             )
+            # Report critical perf failure to metrics server using singleton
+            MetricsPublisher.get_instance().send_error_metric(
+                error_type=ERROR_TYPE_PERF_FAILURE,
+                error_message=ERROR_MSG_PERF_FAILURE,
+                category=COMPONENT_SYSTEM_PROFILER,
+                severity=SEVERITY_CRITICAL,
+                extra_tags={
+                    "method_name": get_current_method_name(),
+                },
+            )
             raise
         metadata = (
             get_current_metadata(cast(ProfileMetadata, self._static_metadata))
@@ -395,51 +477,6 @@ class GProfiler:
             else {"hostname": get_hostname()}
         )
         metadata.update({"profiling_mode": self._profiler_state.profiling_mode})
-
-        # Add sampling event information if custom event is being used
-        if isinstance(self.system_profiler, SystemProfiler) and self.system_profiler._custom_event_name:
-            from gprofiler.platform import get_hypervisor_vendor
-            from gprofiler.utils.hw_events import get_event_type, get_perf_available_events, get_precise_modifier
-
-            event_name = self.system_profiler._custom_event_name
-            hypervisor_vendor = get_hypervisor_vendor()
-            perf_events = get_perf_available_events()
-            event_type = get_event_type(event_name, perf_events)
-
-            # Use "custom" as fallback if event_type is None or empty
-            effective_type = event_type if event_type else "custom"
-            modifier = get_precise_modifier(event_name, effective_type, hypervisor_vendor)
-
-            metadata.update(
-                {
-                    "sampling_event": event_name,
-                    "sampling_mode": "period" if self.system_profiler._perf_period else "frequency",
-                    "precise_modifier": modifier,
-                }
-            )
-
-            if self.system_profiler._perf_period:
-                metadata.update({"sampling_period": self.system_profiler._perf_period})
-            else:
-                metadata.update({"sampling_frequency": self.system_profiler._frequency})
-        elif isinstance(self.system_profiler, SystemProfiler):
-            # Default CPU time-based profiling
-            metadata.update(
-                {
-                    "sampling_event": "cpu-time",
-                    "sampling_mode": "frequency",
-                    "sampling_frequency": self.system_profiler._frequency,
-                }
-            )
-        else:
-            # NoopProfiler - use default values
-            metadata.update(
-                {
-                    "sampling_event": "cpu-time",
-                    "sampling_mode": "frequency",
-                    "sampling_frequency": 11,
-                }
-            )
         metrics = self._system_metrics_monitor.get_metrics()
         hwmetrics = self._hw_metrics_monitor.get_hw_metrics()
         if hwmetrics is None:
@@ -469,7 +506,7 @@ class GProfiler:
             if NoopProfiler.is_noop_profiler(self.system_profiler):
                 temp_merged = concatenate_profiles(
                     process_profiles=process_profiles,
-                    container_names_client=None,
+                    container_names_client=self._profiler_state.container_names_client,
                     enrichment_options=self._enrichment_options,
                     metadata=metadata,
                     metrics=metrics,
@@ -480,7 +517,7 @@ class GProfiler:
                 temp_merged = merge_profiles(
                     perf_pid_to_profiles=system_result,
                     process_profiles=process_profiles,
-                    container_names_client=None,
+                    container_names_client=self._profiler_state.container_names_client,
                     enrichment_options=self._enrichment_options,
                     metadata=metadata,
                     metrics=metrics,
@@ -521,7 +558,6 @@ class GProfiler:
                 flamegraph_html=flamegraph_html,
                 external_app_metadata=external_app_metadata,
             )
-
         if self._output_dir:
             self._generate_output_files(merged_result, local_start_time, local_end_time)
 
@@ -536,7 +572,6 @@ class GProfiler:
                 metrics,
                 self._gpid,
             )
-
         if time.monotonic() - self._last_diagnostics > DIAGNOSTICS_INTERVAL_S:
             self._last_diagnostics = time.monotonic()
             log_diagnostics()
@@ -561,11 +596,45 @@ class GProfiler:
                     # --heart-beat flag
                     self._heartbeat_file_path.touch(mode=644, exist_ok=True)
 
+                # Monitor memory at start of snapshot to detect accumulation patterns
+                try:
+                    process = Process(os.getpid())
+                    start_memory_mb = process.memory_info().rss / (1024 * 1024)
+                    logger.info(f"Snapshot starting with memory usage: {start_memory_mb:.1f}MB")
+                except Exception:
+                    start_memory_mb = 0
+
                 try:
                     self._snapshot()
                 except Exception:
                     logger.exception("Profiling run failed!")
+                    # Report profiling run failure to metrics server using singleton
+                    MetricsPublisher.get_instance().send_error_metric(
+                        error_type=ERROR_TYPE_PROFILING_RUN_FAILURE,
+                        error_message=ERROR_MSG_PROFILING_RUN_FAILURE,
+                        category=COMPONENT_GPROFILER_MAIN,
+                        severity=SEVERITY_ERROR,
+                        extra_tags={
+                            "method_name": get_current_method_name(),
+                        },
+                    )
                 self._usage_logger.log_cycle()
+
+                # Calculate snapshot duration and remaining wait time
+                snapshot_duration = time.monotonic() - snapshot_start
+                remaining_wait = max(self._duration - snapshot_duration, 0)
+
+                # Log timings to understand potential delays in snapshot duration
+                logger.debug(
+                    f"Snapshot timing: duration={snapshot_duration:.1f}s, configured={self._duration}s, wait={remaining_wait:.1f}s"
+                )
+
+                # COMPREHENSIVE CLEANUP AFTER SNAPSHOT
+                logger.debug("Starting comprehensive post-snapshot cleanup...")
+
+                # Single comprehensive cleanup call that handles everything
+                self.maybe_cleanup_subprocesses()
+                logger.debug("Comprehensive post-snapshot cleanup completed")
 
                 # wait for one duration
                 self._profiler_state.stop_event.wait(max(self._duration - (time.monotonic() - snapshot_start), 0))
@@ -575,6 +644,15 @@ class GProfiler:
                     break
 
             self._state.set_cycle_id(None)
+
+    def maybe_cleanup_subprocesses(self):
+        """Clean up subprocess objects if memory management is enabled and memory usage exceeds threshold (default 50MB)."""
+        if not self._memory_management_enabled:
+            return
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / (1024 * 1024)
+        if memory_mb > self._memory_cleanup_threshold_mb:
+            self._memory_manager._cleanup_subprocess_objects()
 
 
 def _submit_profile_logged(
@@ -599,10 +677,40 @@ def _submit_profile_logged(
         )
     except Timeout:
         logger.error("Upload of profile to server timed out.")
+        MetricsPublisher.get_instance().send_error_metric(
+            error_type=ERROR_TYPE_UPLOAD_ERROR,
+            error_message=ERROR_MSG_UPLOAD_ERROR,
+            category=COMPONENT_API_CLIENT,
+            severity=SEVERITY_WARNING,
+            extra_tags={
+                "method_name": get_current_method_name(),
+                "error_category": ERROR_CATEGORY_UPLOAD_TIMEOUT,
+            },
+        )
     except APIError as e:
         logger.error(f"Error occurred sending profile to server: {e}")
+        MetricsPublisher.get_instance().send_error_metric(
+            error_type=ERROR_TYPE_UPLOAD_ERROR,
+            error_message=ERROR_MSG_UPLOAD_ERROR,
+            category=COMPONENT_API_CLIENT,
+            severity=SEVERITY_ERROR,
+            extra_tags={
+                "method_name": get_current_method_name(),
+                "error_category": ERROR_CATEGORY_UPLOAD_API_ERROR,
+            },
+        )
     except RequestException:
         logger.exception("Error occurred sending profile to server")
+        MetricsPublisher.get_instance().send_error_metric(
+            error_type=ERROR_TYPE_UPLOAD_ERROR,
+            error_message=ERROR_MSG_UPLOAD_ERROR,
+            category=COMPONENT_API_CLIENT,
+            severity=SEVERITY_ERROR,
+            extra_tags={
+                "method_name": get_current_method_name(),
+                "error_category": ERROR_CATEGORY_UPLOAD_REQUEST_EXCEPTION,
+            },
+        )
     else:
         logger.info("Successfully uploaded profiling data to the server")
         return cast(str, response_dict.get("gpid", ""))
@@ -681,13 +789,11 @@ def parse_cmd_args() -> configargparse.Namespace:
         help="Profiler duration per session in seconds (default: %(default)s)",
     )
     parser.add_argument(
-        "--min-duration",
+        "--min-profiling-duration",
         type=positive_integer,
         dest="min_duration",
-        default=0,
-        help="Minimum process age in seconds before profiling (default: %(default)s). "
-        "Processes younger than this will be skipped to avoid profiling short-lived processes. "
-        "Set to 0 to disable short-lived process skipping",
+        default=10,
+        help="Minimum profiling duration for young processes in seconds (default: %(default)s)",
     )
     parser.add_argument(
         "--insert-dso-name",
@@ -752,7 +858,7 @@ def parse_cmd_args() -> configargparse.Namespace:
         default=0,
         help="Skip system-wide profilers (perf only) when total system processes exceed this threshold (0=unlimited). "
         "When exceeded, prevents perf profiler from starting to reduce resource usage on busy systems. "
-        "PyPerf has its own threshold via --python-skip-pyperf-profiler-above. "
+        "PyPerf has its own threshold via --skip-pyperf-profiler-above. "
         "Runtime profilers (py-spy, Java, etc.) continue normally with --max-processes limiting. Default: %(default)s",
     )
     parser.add_argument(
@@ -766,32 +872,6 @@ def parse_cmd_args() -> configargparse.Namespace:
     )
 
     _add_profilers_arguments(parser)
-
-    # Custom perf event arguments
-    perf_event_options = parser.add_argument_group("Perf Event")
-    perf_event_options.add_argument(
-        "--perf-event",
-        type=str,
-        dest="perf_event",
-        help="Specify a perf event for flamegraph generation (e.g., cache-misses, page-faults, sched:sched_switch). "
-        "When specified, only perf profiler will be active and all language-specific profilers will be disabled. "
-        "Event can be from 'perf list' or a custom event defined in hw_events.json.",
-    )
-    perf_event_options.add_argument(
-        "--perf-event-period",
-        type=int,
-        dest="perf_event_period",
-        help="Use period-based sampling instead of frequency (-c instead of -F). "
-        "Specify the number of events between samples (e.g., 10000 for sampling every 10000 events). "
-        "Only valid with --perf-event.",
-    )
-    perf_event_options.add_argument(
-        "--hw-events-file",
-        type=str,
-        dest="hw_events_file",
-        help="Path to a JSON file containing custom PMU event definitions. "
-        "Only valid with --perf-event. If not specified, only built-in perf events are available.",
-    )
 
     spark_options = parser.add_argument_group("Spark")
 
@@ -835,6 +915,22 @@ def parse_cmd_args() -> configargparse.Namespace:
         default=False,
         help="Log CPU & memory usage of gProfiler on each profiling iteration."
         " Currently works only if gProfiler runs as a container",
+    )
+
+    # Memory management options
+    memory_options = parser.add_argument_group("memory management")
+    memory_options.add_argument(
+        "--enable-memory-management",
+        action="store_false",
+        dest="memory_management_enabled",
+        default=True,
+        help="Disable centralized memory management and cleanup (default: enabled)",
+    )
+    memory_options.add_argument(
+        "--memory-cleanup-threshold-mb",
+        type=positive_integer,
+        default=50,
+        help="Memory usage threshold in MB to trigger cleanup (default: %(default)s)",
     )
 
     parser.add_argument(
@@ -893,6 +989,41 @@ def parse_cmd_args() -> configargparse.Namespace:
         connectivity.add_argument(
             "--no-verify", help="Do not verify server certificates", action="store_false", dest="verify"
         )
+        connectivity.add_argument(
+            "--tls-client-cert",
+            type=str,
+            default=None,
+            help="Path to client certificate file for mTLS (PEM format). "
+            "Use with --tls-client-key for mutual TLS authentication",
+        )
+        connectivity.add_argument(
+            "--tls-client-key",
+            type=str,
+            default=None,
+            help="Path to client private key file for mTLS (PEM format). "
+            "Use with --tls-client-cert for mutual TLS authentication",
+        )
+        connectivity.add_argument(
+            "--tls-ca-bundle",
+            type=str,
+            default=None,
+            help="Path to CA bundle file for verifying server certificates (PEM format). "
+            "Overrides system default CA bundle when specified",
+        )
+        connectivity.add_argument(
+            "--tls-cert-refresh-enabled",
+            action="store_true",
+            default=False,
+            help="Enable periodic TLS certificate refresh. Useful for short-lived certificates "
+            "(e.g., Normandie certs that rotate every 10-12 hours)",
+        )
+        connectivity.add_argument(
+            "--tls-cert-refresh-interval",
+            type=positive_integer,
+            default=21600,
+            help="Interval in seconds for TLS certificate refresh when --tls-cert-refresh-enabled is set. "
+            "Default: %(default)s seconds (6 hours)",
+        )
 
     extract_resources = subparsers.add_parser("extract-resources")
     extract_resources.set_defaults(func=copy_resources)
@@ -936,6 +1067,26 @@ def parse_cmd_args() -> configargparse.Namespace:
         dest="container_names",
         default=True,
         help="gProfiler won't gather the container names of processes that run in containers",
+    )
+
+    # Metrics publishing options
+    metrics_options = parser.add_argument_group("metrics publishing")
+    metrics_options.add_argument(
+        "--enable-publish-metrics",
+        action="store_true",
+        default=False,
+        help="Enable publishing error metrics to MetricAgent (Goku)",
+    )
+    metrics_options.add_argument(
+        "--metrics-server-url",
+        type=str,
+        help="TCP URL for MetricAgent service (e.g., tcp://localhost:18126)",
+    )
+    metrics_options.add_argument(
+        "--sli-metric-uuid",
+        type=str,
+        default=None,
+        help="UUID for SLI metrics (required for SLI tracking via error-budget counters, configurable per environment)",
     )
 
     continuous_command_parser = parser.add_argument_group("continuous")
@@ -1064,6 +1215,64 @@ def parse_cmd_args() -> configargparse.Namespace:
         help="Interval in seconds for sending heartbeats to server (default: %(default)s)",
     )
 
+    parser.add_argument(
+        "--heartbeat-perf-restricted-max-processes",
+        type=positive_integer,
+        dest="heartbeat_perf_restricted_max_system_processes",
+        default=600,
+        help="Max system processes threshold applied to perf when the heartbeat command uses"
+        " 'enabled_restricted' mode (default: %(default)s)",
+    )
+
+    parser.add_argument(
+        "--heartbeat-perf-restricted-max-containers",
+        type=positive_integer,
+        dest="heartbeat_perf_restricted_max_docker_containers",
+        default=2,
+        help="Max Docker containers to profile when the heartbeat command uses"
+        " 'enabled_restricted' mode (default: %(default)s)",
+    )
+
+    parser.add_argument(
+        "--heartbeat-perf-aggressive-max-processes",
+        type=positive_integer,
+        dest="heartbeat_perf_aggressive_max_system_processes",
+        default=1500,
+        help="Max system processes threshold applied to perf when the heartbeat command uses"
+        " 'enabled_aggressive' mode (default: %(default)s)",
+    )
+
+    parser.add_argument(
+        "--heartbeat-perf-aggressive-max-containers",
+        type=positive_integer,
+        dest="heartbeat_perf_aggressive_max_docker_containers",
+        default=50,
+        help="Max Docker containers to profile when the heartbeat command uses"
+        " 'enabled_aggressive' mode (default: %(default)s)",
+    )
+
+    parser.add_argument(
+        "--heartbeat-workload-name-labels",
+        type=comma_separated_list,
+        dest="heartbeat_workload_name_labels",
+        default=[],
+        help="Comma-separated pod/container label keys, in priority order, to probe when inferring the"
+        " workload name for the heartbeat inventory. Probed before the built-in Kubernetes labels"
+        " (app.kubernetes.io/name, app, k8s-app, ...). Use to surface a vendor/CRD-specific name label,"
+        " e.g. 'mycompany.com/workload-name'.",
+    )
+
+    parser.add_argument(
+        "--heartbeat-workload-kind-labels",
+        type=comma_separated_list,
+        dest="heartbeat_workload_kind_labels",
+        default=[],
+        help="Comma-separated pod/container label keys, in priority order, to probe when inferring the"
+        " workload kind for the heartbeat inventory. When unset, the kind is inferred from the pod-name"
+        " shape (Deployment/StatefulSet/DaemonSet). Use to surface a vendor/CRD-specific kind label,"
+        " e.g. 'mycompany.com/workload-kind'.",
+    )
+
     if is_linux() and not is_aarch64():
         hw_metrics_options = parser.add_argument_group("hardware metrics")
         hw_metrics_options.add_argument(
@@ -1094,14 +1303,6 @@ def parse_cmd_args() -> configargparse.Namespace:
 
     args.perf_inject = args.nodejs_mode == "perf"
     args.perf_node_attach = args.nodejs_mode == "attach-maps"
-
-    # Validate --perf-event-period and -f/--frequency are mutually exclusive
-    # Must check before defaults are applied (args.frequency is None if not explicitly provided)
-    if args.perf_event_period and args.frequency is not None:
-        parser.error(
-            "--perf-event-period and -f/--frequency are mutually exclusive. "
-            "Use --perf-event-period for period-based sampling or -f for frequency-based sampling."
-        )
 
     if args.profiling_mode == CPU_PROFILING_MODE:
         if args.alloc_interval:
@@ -1155,39 +1356,8 @@ def parse_cmd_args() -> configargparse.Namespace:
         if not args.service_name:
             parser.error("--enable-heartbeat-server requires --service-name to be provided")
 
-    # Validate --perf-event-period only works with --perf-event
-    if args.perf_event_period and not args.perf_event:
-        parser.error("--perf-event-period requires --perf-event to be specified")
-
-    # Validate --hw-events-file only works with --perf-event
-    if getattr(args, "hw_events_file", None) and not args.perf_event:
-        parser.error("--hw-events-file requires --perf-event to be specified")
-
-    # Validate --perf-event only works with cpu profiling mode
-    if args.perf_event and args.profiling_mode != CPU_PROFILING_MODE:
-        parser.error("--perf-event is only supported in cpu profiling mode (--mode=cpu)")
-
-    # Validate and resolve perf event arguments
-    if args.perf_event:
-        from gprofiler.platform import get_hypervisor_vendor
-        from gprofiler.utils.hw_events import validate_and_get_event_args, validate_event_with_fallback
-
-        try:
-            # Detect hypervisor
-            hypervisor_vendor = get_hypervisor_vendor()
-
-            # Validate and resolve event
-            hw_events_file = getattr(args, "hw_events_file", None)
-            event_args = validate_and_get_event_args(args.perf_event, hypervisor_vendor, hw_events_file)
-
-            # Test accessibility with fallback
-            validated_args = validate_event_with_fallback(args.perf_event, event_args, hypervisor_vendor)
-
-            # Store resolved event args in args
-            args.perf_event_args = validated_args
-
-        except (ValueError, RuntimeError) as e:
-            parser.error(f"Perf event validation failed: {e}")
+    if args.enable_publish_metrics and not args.metrics_server_url:
+        parser.error("--enable-publish-metrics requires --metrics-server-url to be provided")
 
     return args
 
@@ -1240,9 +1410,7 @@ def verify_preconditions(args: configargparse.Namespace, processes_to_profile: O
 
     try:
         if is_linux() and not grab_gprofiler_mutex():
-            # Another gProfiler instance is running (or lock is held).
-            # Treat as a precondition failure (exit with error status).
-            sys.exit(1)
+            sys.exit(0)
     except Exception:
         traceback.print_exc()
         print(
@@ -1273,7 +1441,6 @@ def log_system_info() -> None:
     logger.info(f"Total RAM: {system_info.memory_capacity_mb / 1024:.2f} GB")
     logger.info(f"Linux distribution: {system_info.os_name} | {system_info.os_release} | {system_info.os_codename}")
     logger.info(f"libc version: {system_info.libc_type}-{system_info.libc_version}")
-    logger.info(f"Hypervisor: {system_info.hypervisor}")
     logger.info(f"Hostname: {system_info.hostname}")
 
 
@@ -1352,10 +1519,21 @@ def main() -> None:
     state = init_state()
 
     remote_logs_handler = (
-        RemoteLogsHandler(args.api_server, args.server_token, args.service_name, args.verify)
+        RemoteLogsHandler(
+            args.api_server,
+            args.server_token,
+            args.service_name,
+            args.verify,
+            args.tls_client_cert,
+            args.tls_client_key,
+            args.tls_ca_bundle,
+            args.tls_cert_refresh_enabled,
+            args.tls_cert_refresh_interval,
+        )
         if _should_send_logs(args)
         else None
     )
+
     global logger
     logger = initial_root_logger_setup(
         logging.DEBUG if args.verbose else logging.INFO,
@@ -1364,6 +1542,26 @@ def main() -> None:
         args.log_rotate_backup_count,
         remote_logs_handler,
     )
+
+    # Initialize metrics publisher (always initialized, enabled flag controls behavior)
+    metrics_publisher = MetricsPublisher(
+        server_url=args.metrics_server_url or "tcp://localhost:18126",
+        service_name=args.service_name or METRIC_BASE_NAME,
+        sli_metric_uuid=args.sli_metric_uuid,
+        enabled=args.enable_publish_metrics,
+    )
+
+    if args.enable_publish_metrics:
+        if args.sli_metric_uuid:
+            logger.info(
+                f"Metrics publishing enabled - connecting to {args.metrics_server_url} (SLI metric UUID: {args.sli_metric_uuid})"
+            )
+        else:
+            logger.info(
+                f"Metrics publishing enabled - connecting to {args.metrics_server_url} (SLI metrics disabled - no UUID configured)"
+            )
+    else:
+        logger.info("Metrics publishing disabled")
 
     warn_about_deprecated_args(args)
     setup_env(args.disable_core_files, args.pid_file)
@@ -1426,9 +1624,6 @@ def main() -> None:
         mkdir_owned_root_wrapper(TEMPORARY_STORAGE_PATH)
 
         try:
-            client_kwargs = {}
-            if "server_upload_timeout" in args:
-                client_kwargs["upload_timeout"] = args.server_upload_timeout
             profiler_api_client = (
                 ProfilerAPIClient(
                     token=args.server_token,
@@ -1437,7 +1632,12 @@ def main() -> None:
                     curlify_requests=args.curlify_requests,
                     hostname=get_hostname(),
                     verify=args.verify,
-                    **client_kwargs,
+                    upload_timeout=args.server_upload_timeout,
+                    tls_client_cert=args.tls_client_cert,
+                    tls_client_key=args.tls_client_key,
+                    tls_ca_bundle=args.tls_ca_bundle,
+                    tls_cert_refresh_enabled=args.tls_cert_refresh_enabled,
+                    tls_cert_refresh_interval=args.tls_cert_refresh_interval,
                 )
                 if args.upload_results
                 else None
@@ -1471,15 +1671,25 @@ def main() -> None:
 
         ApplicationIdentifiers.init(enrichment_options)
         set_diagnostics(args.diagnostics)
-
         # Check if heartbeat server mode is enabled FIRST
         if args.enable_heartbeat_server:
+            if not args.upload_results:
+                logger.error("Heartbeat server mode requires --upload-results to be enabled")
+                sys.exit(1)
+
             # Create heartbeat client
             heartbeat_client = HeartbeatClient(
                 api_server=args.api_server,
                 service_name=args.service_name,
                 server_token=args.server_token,
                 verify=args.verify,
+                tls_client_cert=args.tls_client_cert,
+                tls_client_key=args.tls_client_key,
+                tls_ca_bundle=args.tls_ca_bundle,
+                tls_cert_refresh_enabled=args.tls_cert_refresh_enabled,
+                tls_cert_refresh_interval=args.tls_cert_refresh_interval,
+                workload_name_labels=args.heartbeat_workload_name_labels,
+                workload_kind_labels=args.heartbeat_workload_kind_labels,
             )
 
             # Create dynamic profiler manager
@@ -1494,7 +1704,7 @@ def main() -> None:
             finally:
                 manager.stop()
         else:
-            # Normal profiling mode
+            # Normal profiling mode - create GProfiler instance only when needed
             gprofiler = GProfiler(
                 output_dir=args.output_dir,
                 flamegraph=args.flamegraph,
@@ -1518,10 +1728,10 @@ def main() -> None:
                 external_metadata_path=external_metadata_path,
                 heartbeat_file_path=heartbeat_file_path,
                 perfspect_path=perfspect_path,
-                perfspect_duration=getattr(args, "tool_perfspect_duration", 60),
-                verbose=args.verbose,
+                perfspect_duration=getattr(args, "tool_perfspect_duration", None),
             )
             logger.info("gProfiler initialized and ready to start profiling")
+
             if args.continuous:
                 gprofiler.run_continuous()
             else:
@@ -1538,6 +1748,13 @@ def main() -> None:
     except Exception:
         logger.exception("Unexpected error occurred")
         sys.exit(1)
+    finally:
+        # Clean up metrics publisher
+        if "metrics_publisher" in locals() and hasattr(metrics_publisher, "flush_and_close"):
+            try:
+                metrics_publisher.flush_and_close()
+            except Exception as e:
+                logger.warning(f"Error during metrics publisher cleanup: {e}")
 
     usage_logger.log_run()
 

@@ -135,7 +135,7 @@ def start_process(
         env=env,
         **kwargs,
     )
-
+    _processes.append(process)
     return process
 
 
@@ -150,6 +150,14 @@ def wait_event(timeout: float, stop_event: Event, condition: Callable[[], bool],
 
         if time.monotonic() > end_time:
             raise TimeoutError()
+
+
+def poll_process(process: Popen, timeout: float, stop_event: Event) -> None:
+    try:
+        wait_event(timeout, stop_event, lambda: process.poll() is not None)
+    except StopEventSetException:
+        process.kill()
+        raise
 
 
 def remove_files_by_prefix(prefix: str) -> None:
@@ -256,7 +264,6 @@ def run_process(
             reraise_exc = e
         retcode = process.poll()
         assert retcode is not None  # only None if child has not terminated
-        cleanup_process_reference(process)
 
     result: CompletedProcess[bytes] = CompletedProcess(process.args, retcode, stdout, stderr)
 
@@ -517,19 +524,114 @@ def is_profiler_disabled(profile_mode: str) -> bool:
     return profile_mode in ("none", "disabled")
 
 
-def cleanup_process_reference(process: Popen) -> None:
-    """Remove process from global _processes list"""
-    try:
-        _processes.remove(process)
-    except ValueError:
-        pass  # Already removed
+def cleanup_completed_processes() -> dict:
+    """Clean up completed processes from the global _processes list.
+
+    This function removes subprocess.Popen objects that have already terminated
+    from the global _processes list and properly cleans up their resources.
+
+    Returns:
+        dict: Statistics about the cleanup operation
+    """
+    global _processes
+    if not _processes:
+        return {
+            "total_processes": 0,
+            "completed_processes": 0,
+            "running_processes": 0,
+            "processes_cleaned": 0,
+            "resources_freed": 0,
+        }
+
+    # Count processes by state before cleanup
+    running_count = 0
+    completed_count = 0
+    resources_freed = 0
+    # Separate running and completed processes
+    running_processes = []
+    for process in _processes:
+        if process.poll() is None:  # Still running
+            running_count += 1
+            running_processes.append(process)
+        else:  # Completed - properly clean up resources
+            completed_count += 1
+            try:
+                # Ensure all pipes are closed and process is fully reaped
+                if process.stdout and not process.stdout.closed:
+                    process.stdout.close()
+                    resources_freed += 1
+                if process.stderr and not process.stderr.closed:
+                    process.stderr.close()
+                    resources_freed += 1
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
+                    resources_freed += 1
+                # Call communicate() to ensure process is fully reaped
+                # This is safe because we already know the process is done (poll() returned non-None)
+                try:
+                    process.communicate(timeout=0.1)  # Short timeout, should return immediately
+                except subprocess.TimeoutExpired:
+                    # This shouldn't happen since process.poll() indicated it's done
+                    logger.warning(f"Process {process.pid} appears done but communicate() timed out")
+                    pass
+            except Exception as e:
+                logger.debug(f"Error cleaning up process {process.pid}: {e}")
+                # Continue cleanup even if one process fails
+    # Replace the global list with only running processes
+    original_count = len(_processes)
+    _processes = running_processes
+    cleaned_count = original_count - len(_processes)
+    return {
+        "total_processes": original_count,
+        "completed_processes": completed_count,
+        "running_processes": running_count,
+        "processes_cleaned": cleaned_count,
+        "resources_freed": resources_freed,
+    }
+
+
+def get_process_stats() -> dict:
+    """Get detailed statistics about tracked processes.
+    Returns:
+        dict: Detailed information about all tracked processes
+    """
+    if not _processes:
+        return {"total_processes": 0, "running_processes": 0, "completed_processes": 0, "process_details": []}
+
+    running_count = 0
+    completed_count = 0
+    process_details = []
+
+    for i, process in enumerate(_processes):
+        is_running = process.poll() is None
+        if is_running:
+            running_count += 1
+            status = "running"
+        else:
+            completed_count += 1
+            status = f"exit-{process.returncode}"
+        # Extract command for analysis
+        cmd = process.args
+        if isinstance(cmd, list):
+            cmd_str = " ".join(cmd)
+        else:
+            cmd_str = str(cmd)
+
+        process_details.append(
+            {"index": i, "pid": process.pid, "command": cmd_str, "status": status, "is_running": is_running}
+        )
+
+    return {
+        "total_processes": len(_processes),
+        "running_processes": running_count,
+        "completed_processes": completed_count,
+        "process_details": process_details,
+    }
 
 
 def _exit_handler() -> None:
     for process in _processes:
         process.kill()
-        # remove process in _processes
-        cleanup_process_reference(process)
 
 
 def _sigint_handler(sig: int, frame: Optional[FrameType]) -> None:

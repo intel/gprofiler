@@ -19,7 +19,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Optional
+from typing import Dict, Any, Optional, Deque
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ CONTINUOUS_QUEUE_MAX_SIZE = 1  # Maximum continuous commands to queue
 @dataclass
 class ProfilingCommand:
     """Represents a profiling command with metadata"""
-
     command_id: str
     command_type: str  # 'start' or 'stop'
     profiling_command: Dict[str, Any]
@@ -44,60 +43,51 @@ class ProfilingCommand:
 class CommandManager:
     """Manager for profiling command queues with priority-based execution"""
 
-    def __init__(self) -> None:
+    def __init__(self):
         # Command queues
         self.stop_queue: Deque[ProfilingCommand] = deque()  # For stop commands (highest priority)
         self.adhoc_queue: Deque[ProfilingCommand] = deque()  # For single-run commands (continuous=False)
         self.continuous_queue: Deque[ProfilingCommand] = deque()  # For continuous commands (continuous=True)
         self.queue_lock = threading.Lock()  # Thread-safe queue operations
 
-    def enqueue_command(self, command: ProfilingCommand) -> ProfilingCommand:
-        """Enqueue a command to the appropriate queue
+    def enqueue_command(self, command: ProfilingCommand) -> bool:
+        """Enqueue a command to the appropriate queue, enforcing queue size limits.
+
+        Stop and continuous commands are singleton slots: a new command replaces
+        any queued (not yet running) one, since the newest intent supersedes it.
+        Ad-hoc commands go to a bounded FIFO queue and are rejected when full.
 
         Args:
             command: ProfilingCommand object to enqueue
 
         Returns:
-            ProfilingCommand object that was enqueued
+            True if the command was enqueued, False if it was rejected
         """
-        # Add to appropriate queue
         with self.queue_lock:
             if command.command_type == "stop":
-                # Warn if stop queue exceeds limit
                 if len(self.stop_queue) >= STOP_QUEUE_MAX_SIZE:
-                    logger.warning(
-                        f"Stop queue exceeds limit (max: {STOP_QUEUE_MAX_SIZE}, current: {len(self.stop_queue)}), "
-                        f"but adding command {command.command_id} anyway"
-                    )
+                    logger.info(f"Replacing {len(self.stop_queue)} queued stop command(s) with new command {command.command_id}")
+                    self.stop_queue.clear()
 
                 self.stop_queue.append(command)
                 logger.info(f"Enqueued stop command {command.command_id} (queue size: {len(self.stop_queue)})")
             elif command.is_continuous:
-                # No need for warnings. The queue is always cleared before adding a new continuous command.
-                # Clear continuous queue before adding new continuous command
+                # Continuous is a singleton slot: clear before adding the new command
                 if self.continuous_queue:
-                    logger.info(
-                        f"Clearing {len(self.continuous_queue)} existing continuous commands "
-                        f"before adding new command {command.command_id}"
-                    )
+                    logger.info(f"Clearing {len(self.continuous_queue)} existing continuous commands before adding new command {command.command_id}")
                     self.continuous_queue.clear()
 
                 self.continuous_queue.append(command)
-                logger.info(
-                    f"Enqueued continuous command {command.command_id} (queue size: {len(self.continuous_queue)})"
-                )
+                logger.info(f"Enqueued continuous command {command.command_id} (queue size: {len(self.continuous_queue)})")
             else:
-                # Warn if ad-hoc queue exceeds limit
                 if len(self.adhoc_queue) >= ADHOC_QUEUE_MAX_SIZE:
-                    logger.warning(
-                        f"Ad-hoc queue exceeds limit (max: {ADHOC_QUEUE_MAX_SIZE}, current: {len(self.adhoc_queue)}), "
-                        f"but adding command {command.command_id} anyway"
-                    )
+                    logger.warning(f"Ad-hoc queue is full (max: {ADHOC_QUEUE_MAX_SIZE}), rejecting command {command.command_id}")
+                    return False
 
                 self.adhoc_queue.append(command)
                 logger.info(f"Enqueued ad-hoc command {command.command_id} (queue size: {len(self.adhoc_queue)})")
 
-        return command
+        return True
 
     def get_next_command(self) -> Optional[ProfilingCommand]:
         """Peek at the next command to execute based on priority logic without removing it.
@@ -127,9 +117,7 @@ class CommandManager:
             # Priority 3: Continuous commands (long-running)
             if self.continuous_queue:
                 cmd = self.continuous_queue[0]
-                logger.debug(
-                    f"Peeking at continuous command {cmd.command_id} from queue (size: {len(self.continuous_queue)})"
-                )
+                logger.debug(f"Peeking at continuous command {cmd.command_id} from queue (size: {len(self.continuous_queue)})")
                 return cmd
 
             logger.debug("No commands in queues")
@@ -151,14 +139,14 @@ class CommandManager:
             # Check stop queue first (highest priority)
             if self.stop_queue and self.stop_queue[0].command_id == command_id:
                 # No need to check for pause on stop commands
-                self.stop_queue.popleft()
+                cmd = self.stop_queue.popleft()
                 logger.info(f"Dequeued stop command {command_id} from queue (remaining: {len(self.stop_queue)})")
                 return True
 
             # Check ad-hoc queue
             if self.adhoc_queue and self.adhoc_queue[0].command_id == command_id:
                 # No need to check for pause on ad-hoc commands
-                self.adhoc_queue.popleft()
+                cmd = self.adhoc_queue.popleft()
                 logger.info(f"Dequeued ad-hoc command {command_id} from queue (remaining: {len(self.adhoc_queue)})")
                 return True
 
@@ -167,10 +155,8 @@ class CommandManager:
                 if self.continuous_queue[0].is_paused:
                     logger.info(f"Cannot dequeue continuous command {command_id} because it is paused")
                     return False
-                self.continuous_queue.popleft()
-                logger.info(
-                    f"Dequeued continuous command {command_id} from queue (remaining: {len(self.continuous_queue)})"
-                )
+                cmd = self.continuous_queue.popleft()
+                logger.info(f"Dequeued continuous command {command_id} from queue (remaining: {len(self.continuous_queue)})")
                 return True
 
             logger.debug(f"Command {command_id} not found at first position in any queue. Possibly already dequeued.")
@@ -217,7 +203,7 @@ class CommandManager:
         with self.queue_lock:
             return len(self.stop_queue) > 0 or len(self.adhoc_queue) > 0 or len(self.continuous_queue) > 0
 
-    def clear_queues(self) -> None:
+    def clear_queues(self):
         """Clear all queued commands (used during shutdown)"""
         with self.queue_lock:
             stop_count = len(self.stop_queue)
@@ -227,7 +213,4 @@ class CommandManager:
             self.adhoc_queue.clear()
             self.continuous_queue.clear()
             if stop_count > 0 or adhoc_count > 0 or continuous_count > 0:
-                logger.info(
-                    f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and "
-                    f"{continuous_count} continuous commands from queues"
-                )
+                logger.info(f"Cleared {stop_count} stop, {adhoc_count} ad-hoc and {continuous_count} continuous commands from queues")

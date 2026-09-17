@@ -15,7 +15,7 @@
 #
 
 import logging
-from typing import Any, Dict
+from typing import Dict, Any
 
 from gprofiler.dynamic_profiling_management import ProfilerSlotBase, get_enabled_profiler_types
 from gprofiler.dynamic_profiling_management.command_control import ProfilingCommand

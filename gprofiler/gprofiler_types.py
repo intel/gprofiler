@@ -97,6 +97,10 @@ def integers_list(value_str: str) -> List[int]:
     return values
 
 
+def comma_separated_list(value_str: str) -> List[str]:
+    return [value.strip() for value in value_str.split(",") if value.strip()]
+
+
 def integer_range(min_range: int, max_range: int) -> Callable[[str], int]:
     def integer_range_check(value_str: str) -> int:
         value = int(value_str)

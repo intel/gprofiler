@@ -89,14 +89,10 @@ class ProfilerBase(ProfilerInterface):
         frequency: int,
         duration: int,
         profiler_state: ProfilerState,
-        min_duration: int = 0,
+        min_duration: int = 10,
     ):
         self._frequency = limit_frequency(
-            self.MAX_FREQUENCY,
-            frequency,
-            self.__class__.__name__,
-            logger,
-            profiler_state.profiling_mode,
+            self.MAX_FREQUENCY, frequency, self.__class__.__name__, logger, profiler_state.profiling_mode
         )
         if self.MIN_DURATION is not None and duration < self.MIN_DURATION:
             raise ValueError(
@@ -157,18 +153,12 @@ class ProcessProfilerBase(ProfilerBase):
                     exc_info=True,
                 )
                 result = ProfileData(
-                    self._profiling_error_stack("error", "process went down during profiling", comm),
-                    None,
-                    None,
-                    None,
+                    self._profiling_error_stack("error", "process went down during profiling", comm), None, None, None
                 )
             except Exception as e:
                 logger.exception(f"{self.__class__.__name__}: failed to profile process {pid} ({comm})")
                 result = ProfileData(
-                    self._profiling_error_stack("error", f"exception {type(e).__name__}", comm),
-                    None,
-                    None,
-                    None,
+                    self._profiling_error_stack("error", f"exception {type(e).__name__}", comm), None, None, None
                 )
 
             results[pid] = result
@@ -180,7 +170,7 @@ class ProcessProfilerBase(ProfilerBase):
 
     def _notify_selected_processes(self, processes: List[Process]) -> None:
         pass
-
+    
     def _should_limit_processes(self) -> bool:
         """
         Override this in profilers that should NOT respect the max_processes_per_profiler limit.
@@ -188,33 +178,30 @@ class ProcessProfilerBase(ProfilerBase):
         Runtime profilers (py-spy, Java, Ruby, etc.) should return True (default).
         """
         return True
-
+    
     def _is_system_wide_profiler(self) -> bool:
         """
         Override this in system-wide profilers (perf, eBPF) to return True.
         These profilers can be disabled when system has too many processes.
         """
         return False
-
+    
     def _get_top_processes_by_cpu(self, processes: List[Process], max_processes: int) -> List[Process]:
         """
         Filter processes to the top N by CPU usage to reduce memory consumption.
-
+        
         Args:
             processes: List of processes to filter
             max_processes: Maximum number of processes to return
-
+            
         Returns:
             List of top N processes by CPU usage, or all processes if max_processes <= 0
         """
         if max_processes <= 0 or len(processes) <= max_processes:
             return processes
-
-        logger.info(
-            f"{self.__class__.__name__}: Limiting to top {max_processes} processes "
-            f"(from {len(processes)}) by CPU usage to reduce memory consumption"
-        )
-
+            
+        logger.info(f"{self.__class__.__name__}: Limiting to top {max_processes} processes (from {len(processes)}) by CPU usage to reduce memory consumption")
+        
         # Get CPU usage for each process, handling exceptions gracefully
         processes_with_cpu = []
         for process in processes:
@@ -229,23 +216,16 @@ class ProcessProfilerBase(ProfilerBase):
             except Exception as e:
                 logger.debug(f"Error getting CPU usage for process {process.pid}: {e}")
                 processes_with_cpu.append((process, 0.0))
-
+        
         # Sort by CPU usage (descending) and take top N
         processes_with_cpu.sort(key=lambda x: x[1], reverse=True)
         top_processes = [proc for proc, cpu in processes_with_cpu[:max_processes]]
-
+        
         if logger.isEnabledFor(logging.DEBUG):
-            top_cpu_info = [(proc.pid, cpu) for proc, cpu in processes_with_cpu[: min(5, max_processes)]]
+            top_cpu_info = [(proc.pid, cpu) for proc, cpu in processes_with_cpu[:min(5, max_processes)]]
             logger.debug(f"{self.__class__.__name__}: Selected top processes by CPU: {top_cpu_info}")
-
+        
         return top_processes
-
-    def _get_process_age(self, process: Process) -> float:
-        """Get the age of a process in seconds."""
-        try:
-            return float(time.time() - process.create_time())
-        except (NoSuchProcess, ZombieProcess):
-            return 0.0
 
     @staticmethod
     def _profiling_error_stack(
@@ -258,6 +238,31 @@ class ProcessProfilerBase(ProfilerBase):
         # do here in that case :/
         return ProfilingErrorStack(what, reason, comm)
 
+    def _get_process_age(self, process: Process) -> float:
+        """Get the age of a process in seconds."""
+        try:
+            return time.time() - process.create_time()
+        except (NoSuchProcess, ZombieProcess):
+            return 0.0
+            
+    def _estimate_process_duration(self, process: Process) -> int:
+        """
+        Simple duration estimation: use shorter duration for very young processes.
+        """
+        try:
+            process_age = self._get_process_age(process)
+            
+            # Very young processes (< 5 seconds) get minimal profiling duration
+            # This catches most short-lived tools without complex heuristics
+            if process_age < 5.0:
+                return self._min_duration  # configurable minimum duration for very young processes
+            
+            # Processes running longer get full duration
+            return self._duration
+            
+        except Exception:
+            return self._duration  # Conservative fallback
+
     def snapshot(self) -> ProcessToProfileData:
         processes_to_profile = self._select_processes_to_profile()
         logger.debug(f"{self.__class__.__name__}: selected {len(processes_to_profile)} processes to profile")
@@ -266,13 +271,14 @@ class ProcessProfilerBase(ProfilerBase):
                 process for process in processes_to_profile if process in self._profiler_state.processes_to_profile
             ]
             logger.debug(f"{self.__class__.__name__}: processes left after filtering: {len(processes_to_profile)}")
-
+        
         # Apply max_processes_per_profiler limit for runtime profilers (not system-wide profilers)
         if self._should_limit_processes() and self._profiler_state.max_processes_per_profiler > 0:
             processes_to_profile = self._get_top_processes_by_cpu(
-                processes_to_profile, self._profiler_state.max_processes_per_profiler
+                processes_to_profile, 
+                self._profiler_state.max_processes_per_profiler
             )
-
+        
         self._notify_selected_processes(processes_to_profile)
 
         if not processes_to_profile:
@@ -306,7 +312,7 @@ class SpawningProcessProfilerBase(ProcessProfilerBase):
         frequency: int,
         duration: int,
         profiler_state: ProfilerState,
-        min_duration: int = 0,
+        min_duration: int = 10,
     ):
         super().__init__(frequency, duration, profiler_state, min_duration)
         self._submit_lock = Lock()
@@ -355,12 +361,7 @@ class SpawningProcessProfilerBase(ProcessProfilerBase):
             return
 
         with contextlib.suppress(NoSuchProcess):
-            self._sched.enter(
-                self._BACKOFF_INIT,
-                0,
-                self._check_process,
-                (Process(pid), self._BACKOFF_INIT),
-            )
+            self._sched.enter(self._BACKOFF_INIT, 0, self._check_process, (Process(pid), self._BACKOFF_INIT))
 
     def start(self) -> None:
         super().start()
@@ -372,10 +373,7 @@ class SpawningProcessProfilerBase(ProcessProfilerBase):
             try:
                 register_exec_callback(self._proc_exec_callback)
             except Exception:
-                logger.warning(
-                    "Failed to enable proc_events listener for executed processes",
-                    exc_info=True,
-                )
+                logger.warning("Failed to enable proc_events listener for executed processes", exc_info=True)
             else:
                 self._enabled_proc_events_spawning = True
 

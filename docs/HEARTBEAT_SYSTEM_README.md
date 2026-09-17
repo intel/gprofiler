@@ -1,54 +1,169 @@
 # Profiling Control System with Heartbeat Protocol
 
-This document describes the implementation of a centralized profiling control system where a Performance Studio backend can dynamically issue profiling commands (start/stop) to gProfiler agents via a heartbeat protocol.
+This document describes the implementation of a centralized profiling control system where a backend can dynamically issue profiling commands (start/stop) to gProfiler agents via a heartbeat protocol.
 
 ## System Overview
 
 ```
 ┌─────────────────────┐    Heartbeat     ┌──────────────────────┐
 │                     │ ◄──────────────► │                      │
-│  Performance Studio │                  │   gProfiler Agent    │
-│     Backend         │   Commands       │                      │
+│   Profiling Backend │                  │   gProfiler Agent    │
+│     (REST API)      │   Commands       │                      │
 │                     │ ────────────────► │                      │
 └─────────────────────┘                  └──────────────────────┘
 ```
 
 ### Key Components
 
-1. **Performance Studio Backend** - Central control server that:
-   - Receives profiling requests via REST API
-   - Manages profiling commands for hosts/services
-   - Responds to agent heartbeats with pending commands
-   - Tracks command execution status
+1. **Backend** — central control server that receives profiling requests via REST API, manages commands per host/service, responds to agent heartbeats with pending commands, and tracks execution status.
 
-2. **gProfiler Agent** - Profiling agent that:
-   - Sends periodic heartbeats to the backend
-   - Receives and executes profiling commands
-   - Ensures idempotent command execution
-   - Reports command completion status
+2. **gProfiler Agent** — profiling agent that sends periodic heartbeats, receives and executes commands, provides idempotent execution, and reports command completion.
 
-## Features
+---
 
-### ✅ Backend Features
-- **REST API** for submitting profiling requests
-- **Heartbeat endpoint** for agent communication
-- **Command merging** for multiple requests targeting same host
-- **Process-level and host-level** stop commands
-- **Idempotent command execution** using unique command IDs
-- **Command completion tracking**
-- **PerfSpect integration** for hardware metrics collection
+## Package Structure
 
-### ✅ Agent Features
-- **Heartbeat communication** with configurable intervals
-- **Dynamic profiling** based on server commands
-- **Command-driven execution** (start/stop profiling)
-- **Priority-based command queue** with separate tiers for stop, ad-hoc, and continuous commands
-- **Continuous command pause/resume** to yield execution to higher-priority ad-hoc commands
-- **Idempotency** to prevent duplicate command execution
-- **Persistent command tracking** across agent restarts
-- **Graceful error handling** and retry logic
-- **PerfSpect auto-installation** for hardware metrics collection
-- **Hardware metrics integration** with CPU profiling data
+All dynamic-profiling orchestration lives in **`gprofiler/dynamic_profiling_management/`**:
+
+```
+gprofiler/
+└── dynamic_profiling_management/
+    ├── __init__.py          # ProfilerSlotBase class + shared helpers
+    ├── heartbeat.py         # HeartbeatClient + DynamicGProfilerManager
+    ├── command_control.py   # CommandManager + ProfilingCommand
+    ├── continuous.py        # ContinuousProfilerSlot
+    └── ad_hoc.py            # AdhocProfilerSlot
+```
+
+| File | Responsibility |
+|---|---|
+| `__init__.py` | `ProfilerSlotBase` (shared slot lifecycle), helper functions (`create_profiler_args`, `create_gprofiler_instance`, `get_enabled_profiler_types`) |
+| `heartbeat.py` | `HeartbeatClient` (HTTP/TLS heartbeat communication) and `DynamicGProfilerManager` (thin orchestrator that delegates to the two slots) |
+| `command_control.py` | `CommandManager` (priority queue: stop > ad-hoc > continuous) and `ProfilingCommand` dataclass |
+| `continuous.py` | `ContinuousProfilerSlot(ProfilerSlotBase)` — primary slot for continuous or single-run profiling |
+| `ad_hoc.py` | `AdhocProfilerSlot(ProfilerSlotBase)` — parallel slot for non-overlapping ad-hoc profiling |
+
+### Import Graph (no circular dependencies)
+
+```
+__init__.py  ──►  (no package submodule imports)
+      ▲
+      │
+      ├── continuous.py   imports __init__ + command_control
+      ├── ad_hoc.py       imports __init__ + command_control
+      │
+      └── heartbeat.py    imports continuous + ad_hoc + command_control
+                                   ▲
+                                   │
+                          main.py imports heartbeat
+```
+
+---
+
+## Architecture: Two-Slot Profiler Manager
+
+`DynamicGProfilerManager` uses two execution slots so that non-overlapping profiler types can run in parallel while overlapping types fall back to time-slicing:
+
+```
+DynamicGProfilerManager
+├── primary: ContinuousProfilerSlot   (main continuous/single-run profiler)
+├── adhoc:   AdhocProfilerSlot        (parallel ad-hoc profiler)
+└── command_manager: CommandManager    (priority queue)
+```
+
+### Decision Flow
+
+When a new `start` command arrives:
+
+```
+┌──────────────────────────────────────┐
+│        New "start" command           │
+└──────────────┬───────────────────────┘
+               ▼
+     ┌─────────────────────┐   YES
+     │ Primary slot empty? ├────────► Start in primary slot
+     └────────┬────────────┘
+              │ NO
+              ▼
+     ┌─────────────────────────────┐   YES
+     │ Adhoc slot free AND         ├────────► Start in ad-hoc slot (parallel)
+     │ profiler types don't overlap│
+     └────────┬────────────────────┘
+              │ NO
+              ▼
+     ┌─────────────────────┐   YES
+     │ Primary is continuous├────────► Pause primary → Start new in primary
+     │ (can be paused)?     │          (time-slice fallback)
+     └────────┬────────────┘
+              │ NO
+              ▼
+        Command stays queued
+```
+
+### Profiler Type Overlap Detection
+
+Each profiling command maps its `profiler_configs` to canonical types:
+
+| Config Key | Canonical Type |
+|---|---|
+| `perf` | `perf` |
+| `async_profiler` | `java` |
+| `pyperf` / `pyspy` | `python` |
+| `phpspy` | `php` |
+| `rbspy` | `ruby` |
+| `dotnet_trace` | `dotnet` |
+| `nodejs_perf` | `nodejs` |
+
+Two commands **overlap** when `set(types_A) & set(types_B)` is non-empty. If no `profiler_configs` is specified, all types are assumed enabled.
+
+### ProfilerSlotBase
+
+Both `ContinuousProfilerSlot` and `AdhocProfilerSlot` inherit from `ProfilerSlotBase` which provides:
+
+- **State management**: `gprofiler`, `thread`, `command`, `profiler_types`
+- **Lifecycle**: `stop()`, `is_running()`, `is_running_command(id)`
+- **Shared start/run**: `_start_profiler()`, `_run_profiler()` (thread target)
+- **Hook**: `_on_complete()` — override for slot-specific post-run behavior
+
+### ContinuousProfilerSlot
+
+- Primary slot: handles both continuous and single-run profiling.
+- `can_be_paused()` — returns `True` only for continuous commands.
+- Tracks `command_start_time`.
+- On completion, checks if queued commands are waiting.
+
+### AdhocProfilerSlot
+
+- Parallel slot: always non-continuous (`continuous=False`).
+- `can_run(next_cmd, current_profiler_types)` — checks slot availability, non-continuous, and type non-overlap.
+- `cleanup_if_completed()` — called each heartbeat tick to free the slot when the thread finishes.
+
+---
+
+## Command Queue (CommandManager)
+
+Priority-based queue with three levels:
+
+| Priority | Queue | Max Size | Behavior |
+|---|---|---|---|
+| 1 (highest) | `stop_queue` | 1 | Immediate termination of all profilers |
+| 2 | `adhoc_queue` | 10 | FIFO, single-run commands |
+| 3 (lowest) | `continuous_queue` | 1 | Replaced by newer continuous commands |
+
+Key operations: `enqueue_command`, `get_next_command` (peek), `dequeue_command`, `pause_command`.
+
+---
+
+## HeartbeatClient
+
+Handles HTTP/TLS communication with the backend:
+
+- **TLS/mTLS**: Configurable CA bundle, client cert/key.
+- **Certificate refresh**: Background thread for periodic TLS session refresh.
+- **Idempotency**: Tracks `received_command_ids` and `executed_command_ids` with configurable history limit.
+- **PMU events**: Reports supported hardware performance events via `get_pmu_manager()`.
+
+---
 
 ## API Endpoints
 
@@ -62,15 +177,15 @@ POST /api/metrics/profile_request
 ```json
 {
   "service_name": "my-service",
-  "command_type": "start",  // "start" or "stop"
+  "command_type": "start",
   "duration": 60,
   "frequency": 11,
   "profiling_mode": "cpu",
   "target_hostnames": ["host1", "host2"],
-  "pids": [1234, 5678],  // Optional: specific PIDs
-  "stop_level": "process",  // "process" or "host" (for stop commands)
+  "pids": [1234, 5678],
+  "stop_level": "process",
   "additional_args": {
-    "enable_perfspect": true  // Optional: enable hardware metrics collection
+    "enable_perfspect": true
   }
 }
 ```
@@ -99,22 +214,15 @@ POST /api/metrics/heartbeat
   "hostname": "worker-01",
   "service_name": "my-service",
   "last_command_id": "cmd-uuid",
-  "available_pids" : [java:{}, python:{}],
-  "namespaces" : [{namespace: kube_system, pods : [{pod_name: gprofiler, containers : {{pid:123, name: metrics-exporter},{pid:123, name: metrics-exporter}},{pod_name: webapp, containers : {{pid:123, name: metrics-exporter},{pid:123, name: metrics-exporter}}]}],
   "status": "active",
-  "timestamp": "2025-01-08T11:00:00Z"
+  "timestamp": "2025-01-08T11:00:00Z",
+  "received_command_ids": ["cmd-1", "cmd-2"],
+  "executed_command_ids": ["cmd-1"],
+  "perf_supported_events": ["cycles", "instructions"]
 }
-"containers" -> "host" Table -> {container_name, array_of_hosts}
-"pod" -> "host" Table -> {pod_name, array_of_hosts}
-"namespace" -> "host" Table -> {namespace, array_of_hosts}
-
-1. add k8s namespace hierarchy info as part of heartbeat
-2. save k8s information in hostheartbeats table and create de-normalized table for containersToHosts, podsToHost and namespaceToHosts,
-3. perform profiling : support profiling request by namespaces, pods and containers ( 5 )
-4. test e2e ( 3 )
 ```
 
-**Response:**
+**Response (with command):**
 ```json
 {
   "success": true,
@@ -125,7 +233,11 @@ POST /api/metrics/heartbeat
       "duration": 60,
       "frequency": 11,
       "profiling_mode": "cpu",
-      "pids": ""
+      "continuous": false,
+      "profiler_configs": {
+        "async_profiler": {"enabled": true, "time": "cpu"},
+        "perf": {"mode": "enabled_restricted", "events": ["cycles"]}
+      }
     }
   },
   "command_id": "cmd-uuid"
@@ -143,142 +255,146 @@ POST /api/metrics/command_completion
 {
   "command_id": "cmd-uuid",
   "hostname": "worker-01",
-  "status": "completed",  // "completed" or "failed"
+  "status": "completed",
   "execution_time": 65,
   "error_message": null,
-  "results_path": "s3://bucket/path/to/results"
+  "results_path": "/path/to/results"
 }
 ```
 
-## PerfSpect Hardware Metrics Integration
+---
 
-The heartbeat system supports Intel PerfSpect integration for collecting hardware performance metrics alongside CPU profiling data. This feature enables comprehensive performance analysis by combining software-level profiling with hardware-level metrics.
+## Profiler Configuration Reference
 
-### Overview
-
-When `enable_perfspect: true` is included in the `additional_args` of a profiling request, the gProfiler agent will:
-
-1. **Auto-install PerfSpect**: Downloads and extracts the latest PerfSpect binary from GitHub releases
-2. **Configure hardware collection**: Enables `--enable-hw-metrics-collection` flag
-3. **Set PerfSpect path**: Configures `--perfspect-path` to the auto-installed binary
-4. **Collect metrics**: Runs PerfSpect alongside CPU profiling to gather hardware metrics
-
-### Agent Behavior
-
-#### Command Processing
-When the agent receives a heartbeat response with `enable_perfspect: true` in the `combined_config`:
-
-```python
-# Agent processes the configuration
-if combined_config.get("enable_perfspect", False):
-    new_args.collect_hw_metrics = True
-
-    # Auto-install PerfSpect
-    from gprofiler.perfspect_installer import get_or_install_perfspect
-    perfspect_path = get_or_install_perfspect()
-    if perfspect_path:
-        new_args.tool_perfspect_path = str(perfspect_path)
-        logger.info(f"PerfSpect auto-installed at: {perfspect_path}")
-```
-
-#### Installation Process
-1. **Download**: Fetches `perfspect.tgz` from `https://github.com/intel/PerfSpect/releases/latest/download/perfspect.tgz`
-2. **Extract**: Unpacks to `/tmp/gprofiler_perfspect/perfspect/`
-3. **Verify**: Checks binary exists and is executable
-4. **Configure**: Sets path for gProfiler to use
-
-#### Data Collection
-PerfSpect runs with the following command:
-```bash
-/tmp/gprofiler_perfspect/perfspect/perfspect metrics \
-  --duration 60 \
-  --output /tmp/perfspect_data
-```
-
-### Output Files
-
-When PerfSpect is enabled, additional files are generated:
-
-- **Hardware Metrics CSV**: `/tmp/perfspect_data/{hostname}_metrics.csv`
-- **Hardware Summary CSV**: `/tmp/perfspect_data/{hostname}_metrics_summary.csv`
-- **Hardware HTML Report**: `/tmp/perfspect_data/{hostname}_metrics_summary.html`
-- **Latest Metrics**: `/tmp/perfspect_data/{hostname}_metrics_summary_latest.csv`
-- **Latest HTML**: `/tmp/perfspect_data/{hostname}_metrics_summary_latest.html`
-
-### Example Request with PerfSpect
-
-```bash
-curl -X POST http://localhost:8000/api/metrics/profile_request \
-  -H "Content-Type: application/json" \
-  -d '{
-    "service_name": "web-service",
-    "command_type": "start",
-    "duration": 60,
-    "frequency": 11,
-    "profiling_mode": "cpu",
-    "target_hostnames": ["worker-01", "worker-02"],
-    "additional_args": {
-      "enable_perfspect": true
-    }
-  }'
-```
-
-### Combined Config Example
-
-The agent receives the following `combined_config` in heartbeat responses:
+The `profiler_configs` object in `combined_config` controls which profilers are enabled:
 
 ```json
 {
-  "duration": 60,
-  "frequency": 11,
-  "continuous": true,
-  "command_type": "start",
-  "profiling_mode": "cpu",
-  "enable_perfspect": true
+  "profiler_configs": {
+    "perf": {"mode": "enabled_restricted", "events": ["cycles", "cache-misses"]},
+    "async_profiler": {"enabled": true, "time": "cpu"},
+    "pyperf": "enabled",
+    "pyspy": "enabled_fallback",
+    "phpspy": "enabled",
+    "rbspy": "enabled",
+    "dotnet_trace": "enabled",
+    "nodejs_perf": "enabled"
+  }
 }
 ```
 
-### Requirements
+### Perf Modes
 
-- **Platform**: Linux x86_64 (PerfSpect requirement)
-- **Permissions**: Root access for hardware performance counter access
-- **Network**: Internet access to download PerfSpect binary
-- **Storage**: ~50MB for PerfSpect installation and data files
+| Mode | `max_system_processes` | `max_docker_containers` |
+|---|---|---|
+| `enabled_restricted` | 600 | 2 |
+| `enabled_aggressive` | 1500 | 50 |
+| `disabled` | — | — |
 
-### Troubleshooting
+### Java Async Profiler
 
-#### Common Issues
+The `async_profiler` key accepts a configuration dict or the shorthand string `"disabled"`.
 
-1. **Permission Denied**: Ensure agent runs with sufficient privileges
-   ```bash
-   sudo ./gprofiler --enable-heartbeat-server ...
-   ```
+**Dict format:**
 
-2. **Download Failures**: Check network connectivity and GitHub access
-   ```bash
-   curl -I https://github.com/intel/PerfSpect/releases/latest/download/perfspect.tgz
-   ```
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | bool | no (default `true`) | Set to `false` to disable Java profiling entirely |
+| `time` | string | no (default `"cpu"`) | Profiling mode — see table below |
+| `alloc_interval` | string | no (default `"2MB"`) | Allocation sampling interval; only used when `time` is `"alloc"`. Uses [bitmath](https://pypi.org/project/bitmath/) notation (e.g. `"512KiB"`, `"2MB"`) |
 
-3. **Binary Not Found**: Verify installation directory permissions
-   ```bash
-   ls -la /tmp/gprofiler_perfspect/perfspect/
-   ```
+**`time` mode values:**
 
-#### Debug Logging
+| Value | async-profiler mode | Description |
+|---|---|---|
+| `"cpu"` | `cpu` | CPU time via `perf_events` |
+| `"itimer"` | `itimer` | CPU time via `SIGPROF` (fallback when perf events are unavailable) |
+| `"wall"` | `wall` | Wall-clock time (includes threads waiting on I/O or sleeping) |
+| `"alloc"` | `alloc` | Allocation profiling; sets `profiling_mode` to `"allocation"`. Interval is controlled by `alloc_interval` (e.g. `"512KiB"`, `"2MB"`) |
+| `"auto"` | `cpu` or `itimer` | Selects `cpu` if perf events are available on the host; falls back to `itimer` |
 
-Enable verbose logging to see PerfSpect installation and execution details:
-```bash
-./gprofiler --enable-heartbeat-server --verbose
+**Examples:**
+
+```json
+{"enabled": true, "time": "cpu"}
+{"enabled": true, "time": "itimer"}
+{"enabled": true, "time": "wall"}
+{"enabled": true, "time": "alloc", "alloc_interval": "512KiB"}
+{"enabled": true, "time": "auto"}
+{"enabled": false}
 ```
 
-Look for log messages:
-- `PerfSpect auto-installed at: /path/to/binary`
-- `Using perfspect path: /path/to/binary`
-- `Failed to auto-install PerfSpect, hardware metrics disabled`
+**String shorthand:** `"disabled"` is equivalent to `{"enabled": false}` and is supported for backward compatibility.
 
-## Usage Examples
+### Python
 
-### Backend - Submit Start Command
+- `pyperf: "enabled"` — eBPF-based PyPerf
+- `pyspy: "enabled_fallback"` — py-spy as fallback (auto mode)
+- Both `"disabled"` — Python profiling off
+
+---
+
+## PerfSpect Hardware Metrics Integration
+
+When `enable_perfspect: true` is set in `combined_config`, the agent:
+
+1. Locates the pre-installed PerfSpect binary via `resource_path("perfspect/perfspect")`
+2. Enables `collect_hw_metrics`
+3. Runs PerfSpect alongside CPU profiling
+
+### Output Files
+
+- `{hostname}_metrics.csv` — raw hardware metrics
+- `{hostname}_metrics_summary.csv` — summary CSV
+- `{hostname}_metrics_summary.html` — summary HTML report
+
+### Requirements
+
+- Linux x86_64
+- Root access for hardware performance counters
+- PerfSpect binary pre-installed as a resource
+
+---
+
+## Command Flow
+
+```
+1. User submits profiling request to backend
+   ↓
+2. Backend creates command with unique ID
+   ↓
+3. Agent sends heartbeat to backend
+   ↓
+4. Backend responds with pending command
+   ↓
+5. Agent enqueues command in CommandManager
+   ↓
+6. DynamicGProfilerManager routes to primary or ad-hoc slot
+   ↓
+7. Profiler runs in a daemon thread
+   ↓
+8. On completion, command is dequeued and completion reported
+```
+
+---
+
+## Usage
+
+### Run Agent in Heartbeat Mode
+
+```bash
+sudo ./gprofiler \
+  --enable-heartbeat-server \
+  --upload-results \
+  --token "$TOKEN" \
+  --service-name "my-service" \
+  --api-server "http://backend:8000" \
+  --heartbeat-interval 30 \
+  --output-dir /tmp/profiles \
+  --verbose
+```
+
+### Submit Start Command
 
 ```bash
 curl -X POST http://localhost:8000/api/metrics/profile_request \
@@ -290,13 +406,10 @@ curl -X POST http://localhost:8000/api/metrics/profile_request \
     "frequency": 11,
     "profiling_mode": "cpu",
     "target_hostnames": ["web-01", "web-02"]
-    "containers" : [],
-    "pods" : [],
-    "namespaces" : [],
   }'
 ```
 
-### Backend - Submit Stop Command
+### Submit Stop Command
 
 ```bash
 curl -X POST http://localhost:8000/api/metrics/profile_request \
@@ -309,387 +422,192 @@ curl -X POST http://localhost:8000/api/metrics/profile_request \
   }'
 ```
 
-### Agent - Run in Heartbeat Mode
+---
 
-**Basic heartbeat mode:**
-```bash
-python gprofiler/main.py \
-  --enable-heartbeat-server \
-  --upload-results \
-  --token "your-token" \
-  --service-name "web-service" \
-  --api-server "http://performance-studio:8000" \
-  --heartbeat-interval 30 \
-  --output-dir /tmp/profiles \
-  --verbose
-```
-
-**Production deployment with all optimizations:**
-```bash
-# Set environment variables first
-export GPROFILER_TOKEN="my_token"
-export GPROFILER_SERVICE="your-service-name"
-export GPROFILER_SERVER="http://localhost:8080"
-
-# Production command (can also source /opt/gprofiler/envs.sh for variables)
-/opt/gprofiler/gprofiler \
-  -u \
-  --token=$GPROFILER_TOKEN \
-  --service-name=$GPROFILER_SERVICE \
-  --server-host $GPROFILER_SERVER \
-  --dont-send-logs \
-  --server-upload-timeout 10 \
-  -c \
-  --disable-metrics-collection \
-  --java-safemode= \
-  -d 60 \
-  --java-no-version-check
-```
-
-## Implementation Details
-
-### Backend Logic
-
-1. **Command Generation**: Each profiling request generates a unique `command_id`
-2. **Command Merging**: Multiple requests for the same host are merged into single commands
-3. **Stop Handling**:
-   - Process-level stops remove specific PIDs from commands
-   - Host-level stops terminate all profiling for the host
-4. **Heartbeat Response**: Returns pending commands with `command_type` and configuration
-
-### Agent Logic
-
-1. **Heartbeat Loop**: Sends heartbeats at configured intervals
-2. **Command Enqueueing**: Each received command is validated for idempotency and placed in the appropriate priority queue via `CommandManager`
-3. **Command Processing** (on every heartbeat tick):
-   - Peeks at the highest-priority pending command with `get_next_command()`
-   - `stop`: Immediately stops the current profiler, clears all queues, and reports completion
-   - `start` (ad-hoc or continuous): If the current profiler is a pausable continuous run, it is paused to make room; then the new profiler is started in a background thread
-   - On profiler thread exit, calls `dequeue_command()` to remove the finished command and allow the next queued command to be scheduled
-4. **Idempotency**: Received and executed command IDs are tracked in memory (up to 1000 entries each) to prevent duplicate processing
-5. **Persistence**: Executed command state is maintained in memory across heartbeat iterations
-
-### Command Flow
+## CLI Options
 
 ```
-1. User submits profiling request to backend
-   ↓
-2. Backend creates command with unique ID
-   ↓
-3. Agent sends heartbeat to backend
-   ↓
-4. Backend responds with pending command
-   ↓
-5. Agent checks idempotency (skip if already received)
-   ↓
-6. Agent enqueues command in the appropriate priority queue
-   (stop_queue | adhoc_queue | continuous_queue)
-   ↓
-7. Agent peeks at highest-priority queued command
-   ↓
-8. If ready, agent executes command (start/stop profiling)
-   - stop: clears all queues, stops profiler
-   - start (ad-hoc): pauses current continuous profiler if running,
-     starts ad-hoc profiler in background thread
-   - start (continuous): starts continuous profiler in background thread
-   ↓
-9. Profiler thread finishes → dequeues command → next command scheduled
-   ↓
-10. Agent reports completion to backend
-    ↓
-11. Backend updates command status
+--enable-heartbeat-server         Enable heartbeat communication
+--heartbeat-interval SECONDS      Heartbeat frequency (default: 30)
+--api-server URL                  Backend server URL
+--upload-results, -u              Upload results to backend
+--token TOKEN                     Authentication token
+--service-name NAME               Service identifier
+--output-dir, -o PATH             Local output directory
+--continuous, -c                  Continuous profiling mode
+--duration, -d SECONDS            Profiling duration
+--verbose                         Enable verbose logging
+--enable-hw-metrics-collection    Enable PerfSpect hardware metrics
+--perfspect-path PATH             Path to PerfSpect binary
+--perfspect-duration SECONDS      PerfSpect collection duration (default: 60)
+--tls-client-cert PATH            Client certificate for mTLS
+--tls-client-key PATH             Client key for mTLS
+--tls-ca-bundle PATH              Custom CA bundle
+--tls-cert-refresh-enabled        Enable periodic TLS certificate refresh
+--tls-cert-refresh-interval SECS  Certificate refresh interval (default: 21600)
 ```
 
-### Command Queue Architecture
+---
 
-The `CommandManager` class (in `gprofiler/command_control.py`) manages three independent FIFO queues and enforces priority-based scheduling.
+## Test Cases
 
-#### Queue Types and Size Limits
+The following manual test cases verify the parallel/time-slicing behavior of the two-slot manager. These should be automated as unit/integration tests in a future iteration.
 
-| Queue | Purpose | Max Size | Overflow Behaviour |
+### TC1 — Parallel: Non-Overlapping Profiler Types
+
+**Setup:** Continuous profiler running Java async-profiler. Ad-hoc command arrives enabling Python (pyperf + py-spy) only.
+
+**Expected:** Non-overlapping types (`java` vs `python`) → ad-hoc runs in the **parallel ad-hoc slot** without disturbing the continuous profiler.
+
+**Observed:** Agent logged `"Starting parallel ad-hoc profiler … (non-overlapping profiler types)"`.
+
+**Result:** PASS
+
+---
+
+### TC2 — Time-Slice: Overlapping Profiler Types
+
+**Setup:** Continuous profiler running Java async-profiler. Ad-hoc command arrives also enabling Java async-profiler.
+
+**Expected:** Overlapping type (`java`) → time-slice behavior: pause/stop continuous, run ad-hoc, then resume continuous via the queue.
+
+**Observed:** Agent logged `"Pausing current profiler … (overlapping types)"` and the continuous profiler was stopped before the ad-hoc started.
+
+**Known Issue:** During the stop path, an error `'NoopProfiler' object has no attribute 'name'` was emitted. This is a pre-existing issue unrelated to the parallel slot feature — `NoopProfiler` should either provide a `name` attribute or the stop/logging code should guard against its absence.
+
+**Result:** PASS (with pre-existing warning)
+
+---
+
+### TC3 — Continuous Replacement
+
+**Setup:** Continuous profiler running. A new continuous command arrives with different configuration.
+
+**Expected:** The latest continuous config replaces the prior one. Only one continuous command should be active/queued at any time.
+
+**Observed:** New continuous start replaced the prior continuous.
+
+**Result:** PASS
+
+---
+
+### TC4 — Time-Slice: Partial Overlap
+
+**Setup:** Continuous profiler with Python profiling enabled. Ad-hoc command arrives enabling pyperf only.
+
+**Expected:** Overlapping type (`python`) → time-slice (continuous yields to ad-hoc).
+
+**Observed:** Agent identified overlap and paused/stopped continuous to run ad-hoc.
+
+**Result:** PASS
+
+---
+
+### TC5 — Ad-Hoc Queue Serialization
+
+**Setup:** Two ad-hoc commands submitted in rapid succession while primary slot is occupied.
+
+**Expected:** First ad-hoc runs in the ad-hoc slot (or primary after time-slice). Second ad-hoc waits in the queue until the first completes.
+
+**Observed:** Second ad-hoc waited until the first completed before executing.
+
+**Result:** PASS
+
+---
+
+### Test Summary
+
+| TC | Scenario | Slot Used | Result |
 |---|---|---|---|
-| `stop_queue` | Immediate stop commands | 1 | Warning logged, command still added |
-| `adhoc_queue` | Single-run (`continuous=False`) start commands | 10 | Warning logged, command still added |
-| `continuous_queue` | Long-running (`continuous=True`) start commands | 1 | Previous continuous command is discarded |
+| TC1 | Non-overlapping (Java + Python) | Parallel ad-hoc | PASS |
+| TC2 | Overlapping (Java + Java) | Time-slice | PASS (known warning) |
+| TC3 | Continuous replacement | Primary | PASS |
+| TC4 | Partial overlap (Python + pyperf) | Time-slice | PASS |
+| TC5 | Queued ad-hoc serialization | Queue | PASS |
 
-#### Priority Ordering
+### Future: Automating These Tests
 
-```
-stop_queue  (highest)  →  adhoc_queue  →  continuous_queue  (lowest)
-```
+These test cases can be converted to unit tests by mocking `HeartbeatClient.send_heartbeat()` to return scripted command sequences and asserting on:
 
-`get_next_command()` always peeks at queues in this order, so a pending stop command pre-empts any ad-hoc or continuous work, and an ad-hoc command pre-empts a running continuous profiler.
+- Which slot each command was routed to (`primary.is_running()`, `adhoc.is_running()`)
+- Profiler type sets on each slot (`primary.profiler_types`, `adhoc.profiler_types`)
+- Queue state after each step (`command_manager.has_queued_commands()`)
+- Log messages emitted (using `caplog` fixture in pytest)
 
-#### Continuous Command Pause Mechanism
-
-When a new start command arrives while a **continuous** profiler is running and there is a higher-priority ad-hoc command waiting:
-
-1. `pause_command(current_command_id)` is called, marking the continuous command's `is_paused = True` in the queue.
-2. `_stop_current_profiler()` terminates the running profiler thread.
-3. The paused continuous command **remains in the queue** (it cannot be dequeued while `is_paused=True`).
-4. The ad-hoc command is picked up on the next tick, started, and eventually dequeued when its profiler thread exits.
-5. Once the ad-hoc queue is empty, the paused continuous command is at the head of `continuous_queue` and is restarted on the next tick.
-
-> **Note:** Ad-hoc and stop commands cannot be paused—any attempt is rejected with a warning log.
-
-#### Key `CommandManager` Methods
-
-| Method | Description |
-|---|---|
-| `enqueue_command(cmd)` | Routes command to the correct queue; clears `continuous_queue` before inserting a new continuous command |
-| `get_next_command()` | Peeks at the highest-priority pending command without removing it |
-| `dequeue_command(cmd_id)` | Removes a command from the head of its queue; refuses to dequeue a paused continuous command |
-| `pause_command(cmd_id)` | Sets `is_paused=True` on the first continuous command matching `cmd_id` |
-| `has_queued_commands()` | Returns `True` if any queue is non-empty |
-| `clear_queues()` | Empties all queues (called on stop command or shutdown) |
-
-## Configuration
-
-### Backend Configuration
-- Database connection for command storage
-- API endpoints for profiling control
-- Command merging and deduplication logic
-
-### Agent Configuration
-```bash
---enable-heartbeat-server     # Enable heartbeat mode
---heartbeat-interval 30       # Heartbeat frequency (seconds)
---api-server URL             # Backend server URL
---upload-results             # Required for heartbeat mode
---token TOKEN                # Authentication token
---service-name NAME          # Service identifier
-```
-
-## Testing
-
-### Test Scripts
-
-1. **test_heartbeat_system.py** - Test backend API and heartbeat flow
-2. **run_heartbeat_agent.py** - Run agent in heartbeat mode for testing
-
-### Test Workflow
-
-1. Start Performance Studio backend
-2. Run test agent: `python run_heartbeat_agent.py`
-3. Submit test commands: `python test_heartbeat_system.py`
-4. Verify agent receives and executes commands
-5. Check idempotency and error handling
+---
 
 ## Error Handling
 
+### Agent
+- Retries failed heartbeats with backoff (heartbeat loop continues on errors)
+- Graceful profiler shutdown via `stop()` + `maybe_cleanup_subprocesses()`
+- Command dequeue in `finally` block ensures no orphaned queue entries
+- Failed commands are reported to backend via `send_command_completion(status="failed")`
+
 ### Backend
 - Validates profiling request parameters
-- Handles database connection errors
 - Returns appropriate HTTP status codes
-- Logs all operations for debugging
+- Responds to heartbeats with pending commands or empty acknowledgements
 
-### Agent
-- Retries failed heartbeats with backoff
-- Continues heartbeat loop on command execution errors
-- Persists executed command IDs across restarts
-- Graceful shutdown on termination signals
+---
 
-## Security Considerations
+## Security
 
-- **Authentication**: Token-based authentication for agent-backend communication
-- **Authorization**: Service-based access control for profiling commands
-- **Command Validation**: Validate all command parameters before execution
-- **Rate Limiting**: Prevent abuse of profiling requests
-- **Audit Logging**: Track all profiling activities for compliance
+- **Authentication**: Token-based (`Authorization: Bearer`) for agent-backend communication
+- **mTLS**: Optional mutual TLS with client cert/key and custom CA bundle
+- **Certificate Refresh**: Background thread for periodic TLS session refresh (configurable interval)
+- **Command Validation**: All command parameters validated before execution
+- **Idempotency**: Duplicate commands rejected via received/executed ID tracking
 
-## Future Enhancements
+---
 
-- **Real-time Status**: WebSocket connection for real-time agent status
-- **Command Scheduling**: Schedule profiling commands for future execution
-- **Resource Monitoring**: Check system resources before starting profiling
-- **Multi-tenant Support**: Isolation between different services/teams
-- **Distributed Coordination**: Coordinate profiling across multiple agents
-- **Continuous Command Resume**: Formal unpause/resume API so that a paused continuous command can carry its original configuration forward without re-enqueueing
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Agent not receiving commands**
-   - Check network connectivity to backend
-   - Verify authentication token
-   - Check service name matching
-
-2. **Commands not executing**
-   - Check agent logs for errors
-   - Verify command parameters are valid
-   - Check system permissions for profiling
-
-3. **Duplicate commands**
-   - Verify idempotency implementation
-   - Check command ID persistence
-   - Review heartbeat timing
-
-4. **PerfSpect hardware metrics not working**
-   - Ensure Linux x86_64 platform (PerfSpect requirement)
-   - Verify root/sudo permissions for hardware counters
-   - Check internet connectivity for auto-installation
-   - Look for "PerfSpect auto-installed" or "Failed to auto-install" log messages
-   - Verify `/tmp/gprofiler_perfspect/perfspect/perfspect` binary exists and is executable
-
-### Debugging
-
-- Enable verbose logging: `--verbose`
-- Check heartbeat logs: `/tmp/gprofiler-heartbeat.log`
-- Monitor backend API logs
-- Use test scripts to isolate issues
-- For PerfSpect issues:
-  - Check PerfSpect installation: `ls -la /tmp/gprofiler_perfspect/perfspect/`
-  - Test PerfSpect manually: `/tmp/gprofiler_perfspect/perfspect/perfspect --help`
-  - Check PerfSpect data directory: `ls -la /tmp/perfspect_data/`
-  - Monitor hardware metrics collection in agent logs
-
-## Building and Running gProfiler Locally
+## Building and Running Locally
 
 ### Prerequisites
-- Linux system (x86_64 or Aarch64)
-- Python 3.10+ for source builds
-- Docker for containerized builds
+- Linux (x86_64 or Aarch64)
+- Python 3.10+
+- Docker (for containerized builds)
 - 16GB+ RAM for full builds
-- Root access for profiling operations
+- Root access for profiling
 
-### Build Options
-
-#### 1. Build Executable (Recommended)
+### Build
 
 ```bash
 cd gprofiler
 
-# Full build (takes 20-30 minutes, builds all profilers from source)
+# Full build
 ./scripts/build_x86_64_executable.sh
 
-# Fast build (for development, skips some optimizations)
+# Fast build (development)
 ./scripts/build_x86_64_executable.sh --fast
 ```
 
-The executable will be created at `build/x86_64/gprofiler`.
-
-#### 2. Build Docker Image
+### Run from Source
 
 ```bash
-./scripts/build_x86_64_container.sh -t gprofiler
-```
-
-#### 3. Run from Source (Development)
-
-```bash
-# Install dependencies
 pip3 install -r requirements.txt
-
-# Copy required resources
 ./scripts/copy_resources_from_image.sh
-
-# Run directly from source (requires root)
 sudo python3 -m gprofiler [options]
 ```
 
-### Running Locally
-
-#### Basic Local Profiling
+### Quick Test
 
 ```bash
-# Make executable and run basic profiling
-chmod +x build/x86_64/gprofiler
-sudo ./build/x86_64/gprofiler -o /tmp/gprofiler-output -d 30
+sudo ./build/x86_64/gprofiler -o /tmp/profiles -d 30
 ```
 
-#### Production-Style Local Run
+Open `/tmp/profiles/last_flamegraph.html` to view results.
 
-```bash
-# Set environment variables
-export GPROFILER_TOKEN="my_token"
-export GPROFILER_SERVICE="your-service-name"
-export GPROFILER_SERVER="http://localhost:8080"
+---
 
-# Run with production flags
-sudo ./build/x86_64/gprofiler \
-  -u \
-  --token=$GPROFILER_TOKEN \
-  --service-name=$GPROFILER_SERVICE \
-  --server-host $GPROFILER_SERVER \
-  --dont-send-logs \
-  --server-upload-timeout 10 \
-  -c \
-  --disable-metrics-collection \
-  --java-safemode= \
-  -d 60 \
-  --java-no-version-check
-```
+## Troubleshooting
 
-#### Local Heartbeat Mode Testing
+| Problem | Diagnosis |
+|---|---|
+| Agent not receiving commands | Check network, token, service name |
+| Commands not executing | Check agent logs, command parameters, system permissions |
+| Duplicate commands | Verify idempotency tracking, heartbeat timing |
+| PerfSpect not working | Ensure x86_64, root, PerfSpect binary exists |
+| Ad-hoc not running in parallel | Check profiler type overlap — overlapping types fall back to time-slice |
 
-```bash
-# Run agent in heartbeat mode for testing
-sudo ./build/x86_64/gprofiler \
-  --enable-heartbeat-server \
-  --upload-results \
-  --token=$GPROFILER_TOKEN \
-  --service-name=$GPROFILER_SERVICE \
-  --api-server $GPROFILER_SERVER \
-  --heartbeat-interval 30 \
-  --output-dir /tmp/profiles \
-  --dont-send-logs \
-  --server-upload-timeout 10 \
-  --disable-metrics-collection \
-  --java-safemode= \
-  --java-no-version-check \
-  --verbose
-```
-
-#### Local PerfSpect Testing (Manual)
-
-```bash
-# Test PerfSpect integration manually (Linux x86_64 only)
-sudo ./build/x86_64/gprofiler \
-  --enable-hw-metrics-collection \
-  --perfspect-path /path/to/perfspect \
-  --perfspect-duration 60 \
-  --output-dir /tmp/profiles \
-  --duration 60 \
-  --verbose
-```
-
-### Command Line Options Explained
-
-```bash
--u, --upload-results              # Upload results to Performance Studio
---token=$GPROFILER_TOKEN          # Authentication token
---service-name=$GPROFILER_SERVICE # Service identifier
---server-host $GPROFILER_SERVER   # Performance Studio backend URL
---dont-send-logs                  # Disable log transmission
---server-upload-timeout 10        # Upload timeout (seconds)
--c, --continuous                  # Continuous profiling mode
---disable-metrics-collection      # Disable system metrics collection
---java-safemode=                  # Disable Java safe mode (empty value)
--d 60                            # Profiling duration (seconds)
---java-no-version-check          # Skip Java version check
---enable-heartbeat-server         # Enable heartbeat communication
---heartbeat-interval 30           # Heartbeat frequency (seconds)
---api-server URL                  # Heartbeat API server URL
--o, --output-dir PATH            # Local output directory
---verbose                        # Enable verbose logging
-
-# PerfSpect Hardware Metrics Options (Linux x86_64 only)
---enable-hw-metrics-collection    # Enable hardware metrics via PerfSpect
---perfspect-path PATH            # Path to PerfSpect binary (auto-installed in heartbeat mode)
---perfspect-duration SECONDS     # PerfSpect collection duration (default: 60)
-```
-
-### Development Workflow
-
-1. **Build**: `./scripts/build_x86_64_executable.sh --fast`
-2. **Test locally**: `sudo ./build/x86_64/gprofiler -o /tmp/results -d 30`
-3. **View results**: Open `/tmp/results/last_flamegraph.html` in browser
-4. **Test heartbeat**: Run with `--enable-heartbeat-server` flag
-
-### Troubleshooting Local Builds
-
-- **Build fails**: Ensure 16GB+ RAM available
-- **Permission errors**: Run profiling commands with `sudo`
-- **Docker issues**: Ensure Docker daemon is running
-- **Missing dependencies**: Install build requirements with package manager
+Enable verbose logging with `--verbose` for detailed diagnostics.
