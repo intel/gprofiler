@@ -16,6 +16,8 @@
 import datetime
 import gzip
 import json
+import os
+import threading
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
@@ -127,6 +129,11 @@ class ProfilerAPIClient(BaseAPIClient):
         upload_timeout: int,
         verify: bool,
         version: str = "v1",
+        tls_client_cert: Optional[str] = None,
+        tls_client_key: Optional[str] = None,
+        tls_ca_bundle: Optional[str] = None,
+        tls_cert_refresh_enabled: bool = False,
+        tls_cert_refresh_interval: int = 21600,
     ):
         self._server_address = server_address.rstrip("/")
         self._upload_timeout = upload_timeout
@@ -135,16 +142,91 @@ class ProfilerAPIClient(BaseAPIClient):
         self._service = service_name
         self._hostname = hostname
         self._verify = verify
+        self._tls_client_cert = tls_client_cert
+        self._tls_client_key = tls_client_key
+        self._tls_ca_bundle = tls_ca_bundle
+        self._tls_cert_refresh_enabled = tls_cert_refresh_enabled
+        self._tls_cert_refresh_interval = tls_cert_refresh_interval
+        self._refresh_thread: Optional[threading.Thread] = None
+        self._refresh_stop_event = threading.Event()
         super().__init__(curlify_requests)
+        
+        # Start certificate refresh thread if enabled
+        if self._tls_cert_refresh_enabled and (self._tls_client_cert or self._tls_ca_bundle):
+            self._start_cert_refresh_thread()
 
     def _init_session(self) -> None:
         self._session: Session = requests.Session()
-        self._session.verify = self._verify
+        
+        # Configure server certificate verification
+        if self._tls_ca_bundle:
+            # Use custom CA bundle if provided
+            self._session.verify = self._tls_ca_bundle
+        else:
+            # Use default verify setting (True/False or system CA bundle)
+            self._session.verify = self._verify
+        
+        # Configure client certificate for mTLS
+        if self._tls_client_cert and self._tls_client_key:
+            if not os.path.isfile(self._tls_client_cert):
+                raise FileNotFoundError(f"Client certificate not found: {self._tls_client_cert}")
+            if not os.path.isfile(self._tls_client_key):
+                raise FileNotFoundError(f"Client key not found: {self._tls_client_key}")
+            if not os.access(self._tls_client_cert, os.R_OK):
+                raise PermissionError(f"Cannot read client certificate: {self._tls_client_cert}")
+            if not os.access(self._tls_client_key, os.R_OK):
+                raise PermissionError(f"Cannot read client key: {self._tls_client_key}")
+            self._session.cert = (self._tls_client_cert, self._tls_client_key)
+            logger.debug(f"mTLS enabled with client cert: {self._tls_client_cert}")
+        elif self._tls_client_cert or self._tls_client_key:
+            logger.warning("Both --tls-client-cert and --tls-client-key must be provided for mTLS. Ignoring partial configuration.")
+        
         self._session.headers.update({"GPROFILER-API-KEY": self._key, "GPROFILER-SERVICE-NAME": self._service})
 
         # Raises on failure
         self.get_health()
         logger.info(f"The connection to the server was successfully established (service {self._service!r})")
+    
+    def _refresh_session(self) -> None:
+        """Refresh the TLS session by recreating it. Thread-safe."""
+        old_session = self._session
+        try:
+            logger.debug("Refreshing TLS session to reload certificates")
+            self._init_session()
+            # Close old session after new one is established
+            old_session.close()
+            logger.info("TLS session refreshed successfully")
+        except Exception as e:
+            # Restore old session if refresh failed
+            self._session = old_session
+            logger.error(f"Failed to refresh TLS session: {e}. Will retry on next interval.")
+    
+    def _cert_refresh_loop(self) -> None:
+        """Background thread loop for periodic certificate refresh."""
+        logger.info(f"Certificate refresh thread started (interval: {self._tls_cert_refresh_interval}s)")
+        while not self._refresh_stop_event.wait(self._tls_cert_refresh_interval):
+            self._refresh_session()
+        logger.debug("Certificate refresh thread stopped")
+    
+    def _start_cert_refresh_thread(self) -> None:
+        """Start the background thread for certificate refresh."""
+        if self._refresh_thread is None or not self._refresh_thread.is_alive():
+            self._refresh_thread = threading.Thread(
+                target=self._cert_refresh_loop,
+                daemon=True,
+                name="ProfilerAPIClient-CertRefresh"
+            )
+            self._refresh_thread.start()
+            logger.debug(f"Started TLS certificate refresh thread (interval: {self._tls_cert_refresh_interval}s)")
+    
+    def stop_cert_refresh(self) -> None:
+        """Stop the certificate refresh thread. Call during cleanup."""
+        if self._refresh_thread and self._refresh_thread.is_alive():
+            logger.debug("Stopping certificate refresh thread")
+            self._refresh_stop_event.set()
+            self._refresh_thread.join(timeout=5)
+            if self._refresh_thread.is_alive():
+                logger.warning("Certificate refresh thread did not stop gracefully")
 
     def get_base_url(self, api_version: str = None) -> str:
         version = api_version if api_version is not None else self._version

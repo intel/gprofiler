@@ -61,7 +61,18 @@ class RemoteLogsHandler(BatchRequestsHandler):
 
     MAX_BUFFERED_RECORDS = 100 * 1000  # max number of records to buffer locally
 
-    def __init__(self, server_address: str, auth_token: str, service_name: str, verify: bool) -> None:
+    def __init__(
+        self,
+        server_address: str,
+        auth_token: str,
+        service_name: str,
+        verify: bool,
+        tls_client_cert: Optional[str] = None,
+        tls_client_key: Optional[str] = None,
+        tls_ca_bundle: Optional[str] = None,
+        tls_cert_refresh_enabled: bool = False,
+        tls_cert_refresh_interval: int = 21600,
+    ) -> None:
         self._service_name = service_name
         url = urlparse(server_address)
         super().__init__(
@@ -71,6 +82,11 @@ class RemoteLogsHandler(BatchRequestsHandler):
                 scheme=url.scheme,
                 server_address=url.netloc,
                 verify=verify,
+                tls_client_cert=tls_client_cert,
+                tls_client_key=tls_client_key,
+                tls_ca_bundle=tls_ca_bundle,
+                tls_cert_refresh_enabled=tls_cert_refresh_enabled,
+                tls_cert_refresh_interval=tls_cert_refresh_interval,
             )
         )
 

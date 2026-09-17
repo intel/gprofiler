@@ -34,7 +34,7 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers import python
 from gprofiler.profilers.profiler_base import ProfilerBase
 from gprofiler.utils import (
-    cleanup_process_reference,
+    poll_process,
     random_prefix,
     reap_process,
     resource_path,
@@ -60,6 +60,15 @@ class PythonEbpfProfiler(ProfilerBase):
     _GET_FS_OFFSET_RESOURCE = "python/pyperf/get_fs_offset"
     _GET_STACK_OFFSET_RESOURCE = "python/pyperf/get_stack_offset"
     _EVENTS_BUFFER_PAGES = 256  # 1mb and needs to be physically contiguous
+    # ❌ REMOVED: _is_system_profiler = True  # PyPerf now has its own skip logic
+    
+    def _should_limit_processes(self) -> bool:
+        """eBPF Python profiler is system-wide and should not limit processes."""
+        return False
+    
+    def _is_system_wide_profiler(self) -> bool:
+        """eBPF Python profiler is system-wide and can be disabled on busy systems."""
+        return True
     # 28mb (each symbol is 224 bytes), but needn't be physicall contiguous so don't care
     _SYMBOLS_MAP_SIZE = 131072
     _DUMP_SIGNAL = signal.SIGUSR2
@@ -67,6 +76,12 @@ class PythonEbpfProfiler(ProfilerBase):
     _POLL_TIMEOUT = 10  # seconds
     _GET_OFFSETS_TIMEOUT = 5  # seconds
     _OUTPUT_READ_SIZE = 65536  # bytes read every cycle from stderr
+    
+    # Error detection constants
+    _DELETED_LIBRARY_ERROR_PATTERN = "Failed to iterate over ELF symbols"
+    _DELETED_FILE_MARKER = "(deleted)"
+    _PYTHON_SETUP_FAILURE = "Setup new python failed"
+    _TEMPORARY_FILE_PATTERNS = ["runfiles_", ".tmp/", "build_", "temp_"]  # Generic temporary file patterns
 
     def __init__(
         self,
@@ -77,7 +92,7 @@ class PythonEbpfProfiler(ProfilerBase):
         add_versions: bool,
         user_stacks_pages: Optional[int] = None,
         verbose: bool,
-        min_duration: int = 0,
+        min_duration: int = 10,
         python_skip_pyperf_profiler_above: int = 0,
     ):
         super().__init__(frequency, duration, profiler_state, min_duration)
@@ -101,27 +116,20 @@ class PythonEbpfProfiler(ProfilerBase):
         This ensures consistent counting between PyPerf skip logic and py-spy process selection.
         """
         try:
-            from gprofiler.utils import pgrep_exe, pgrep_maps
-
-            # Count all processes that match Python detection criteria
-            python_pattern = "python"
-            python_processes = set()
-
-            # Check via maps (memory mappings contain libpython)
-            try:
-                python_processes.update(pgrep_maps(python_pattern))
-            except Exception:
-                pass
-
-            # Check via executable name
-            try:
-                python_processes.update(pgrep_exe(python_pattern))
-            except Exception:
-                pass
-
-            return len(python_processes)
+            from gprofiler.utils import pgrep_maps, pgrep_exe
+            from granulate_utils.python import DETECTED_PYTHON_PROCESSES_REGEX
+            from gprofiler.platform import is_windows
+            
+            if is_windows():
+                # Windows: Use executable name matching
+                all_processes = [x for x in pgrep_exe("python")]
+            else:
+                # Linux: Use memory map scanning (same as py-spy)
+                all_processes = [x for x in pgrep_maps(DETECTED_PYTHON_PROCESSES_REGEX)]
+            
+            return len(all_processes)
         except Exception as e:
-            logger.debug(f"Error counting Python processes: {e}")
+            logger.warning(f"Could not count Python processes for PyPerf skip logic: {e}")
             return 0
 
     def should_skip_due_to_python_threshold(self) -> bool:
@@ -131,21 +139,18 @@ class PythonEbpfProfiler(ProfilerBase):
         """
         if self._python_skip_pyperf_profiler_above <= 0:
             return False  # No threshold set, don't skip
-
+        
         python_process_count = self._count_python_processes()
         should_skip = python_process_count > self._python_skip_pyperf_profiler_above
-
+        
         if should_skip:
             logger.info(
                 f"Skipping PyPerf - {python_process_count} Python processes exceed threshold "
                 f"of {self._python_skip_pyperf_profiler_above}. py-spy fallback will be used for Python profiling."
             )
         else:
-            logger.debug(
-                f"PyPerf: Python process count {python_process_count} "
-                f"(threshold: {self._python_skip_pyperf_profiler_above})"
-            )
-
+            logger.debug(f"PyPerf: Python process count {python_process_count} (threshold: {self._python_skip_pyperf_profiler_above})")
+        
         return should_skip
 
     @classmethod
@@ -242,14 +247,13 @@ class PythonEbpfProfiler(ProfilerBase):
         # pyperf sometimes has a lot of output to stdout and stderr, which makes the process halt until read.
         process = start_process(cmd, tmpdir=self._pyperf_staticx_tmpdir, pipesize=1024 * 1024)
         try:
-            wait_event(self._POLL_TIMEOUT, self._profiler_state.stop_event, lambda: process.poll() is not None)
-        except (TimeoutError, StopEventSetException):
+            poll_process(process, self._POLL_TIMEOUT, self._profiler_state.stop_event)
+        except TimeoutError:
             process.kill()
             raise
         else:
             self._check_output(process, self.output_path)
         finally:
-            cleanup_process_reference(process)
             self._staticx_cleanup()
 
     def start(self) -> None:
@@ -281,7 +285,6 @@ class PythonEbpfProfiler(ProfilerBase):
             wait_event(self._POLL_TIMEOUT, self._profiler_state.stop_event, lambda: os.path.exists(self.output_path))
         except TimeoutError:
             process.kill()
-            cleanup_process_reference(process)
             assert process.stdout is not None and process.stderr is not None
             stdout = process.stdout.read()
             stderr = process.stderr.read()
@@ -292,20 +295,6 @@ class PythonEbpfProfiler(ProfilerBase):
             self.process = process
             self._register_process_selectors()
 
-    def _check_process_health(self) -> bool:
-        """Check if the process is still alive and clean up if not"""
-        if self.process is None:
-            return False
-
-        if self.process.poll() is not None:
-            # Process has terminated
-            logger.warning("PyPerf process has terminated unexpectedly")
-            cleanup_process_reference(process=self.process)
-            self.process = None
-            return False
-
-        return True
-
     def _register_process_selectors(self) -> None:
         self.process_selector = selectors.DefaultSelector()
         assert self.process_selector and self.process and self.process.stdout and self.process.stderr  # for mypy
@@ -313,9 +302,14 @@ class PythonEbpfProfiler(ProfilerBase):
         self.process_selector.register(self.process.stderr, selectors.EVENT_READ)
 
     def _unregister_process_selectors(self) -> None:
-        assert self.process_selector
-        self.process_selector.close()
-        self.process_selector = None
+        if self.process_selector is not None:
+            try:
+                self.process_selector.close()
+            except (OSError, ValueError) as e:
+                # Selector might already be closed by cleanup process
+                logger.debug(f"Selector close failed (likely already closed): {e}")
+            finally:
+                self.process_selector = None
 
     def _read_process_standard_outputs(self) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -328,20 +322,46 @@ class PythonEbpfProfiler(ProfilerBase):
         assert self.process_selector and self.process
         for key, _ in self.process_selector.select(timeout=0):
             output = key.fileobj.read1(self._OUTPUT_READ_SIZE)  # type: ignore
-            output = cast(str, output)
+            # Properly convert bytes to string if needed
+            if isinstance(output, bytes):
+                output = output.decode('utf-8', errors='replace')
             if key.fileobj is self.process.stdout:
                 stdout = output
             elif key.fileobj is self.process.stderr:
                 stderr = output
         return stdout, stderr
 
-    def _dump(self) -> Optional[Path]:
-        if not self._check_process_health():
-            logger.error("PyPerf process is not running")
-            return None
+    def _is_deleted_library_error(self, stderr_str: str) -> bool:
+        """Check if stderr contains deleted library errors."""
+        return (self._DELETED_LIBRARY_ERROR_PATTERN in stderr_str and 
+                self._DELETED_FILE_MARKER in stderr_str)
+
+    def _is_temporary_file_error(self, stderr_str: str) -> bool:
+        """Check if stderr contains temporary file system errors."""
+        return (self._PYTHON_SETUP_FAILURE in stderr_str and 
+                any(pattern in stderr_str for pattern in self._TEMPORARY_FILE_PATTERNS))
+
+    def _process_pyperf_stderr(self, stderr_str: str, stdout: bytes) -> None:
+        """Process PyPerf stderr output and log appropriately."""
+        # Check for deleted library errors and handle gracefully
+        if self._is_deleted_library_error(stderr_str):
+            deleted_lib_errors = stderr_str.count(self._PYTHON_SETUP_FAILURE)
+            if deleted_lib_errors > 0:
+                logger.info(f"PyPerf skipped {deleted_lib_errors} processes with deleted libraries - "
+                          f"this is normal for temporary/containerized environments")
+        
+        # Filter verbose debug output for temporary file systems
+        if self._is_temporary_file_error(stderr_str):
+            error_count = stderr_str.count(self._PYTHON_SETUP_FAILURE)
+            logger.debug(f"PyPerf dump output (filtered {error_count} temporary file errors)", 
+                        stdout=stdout, stderr="<temporary file errors filtered>")
         else:
-            if self.process is not None:
-                self.process.send_signal(self._DUMP_SIGNAL)
+            logger.debug("PyPerf dump output", stdout=stdout, stderr=stderr_str)
+
+    def _dump(self) -> Path:
+        assert self.is_running()
+        assert self.process is not None  # for mypy
+        self.process.send_signal(self._DUMP_SIGNAL)
 
         try:
             # important to not grab the transient data file - hence the following '.'
@@ -349,7 +369,13 @@ class PythonEbpfProfiler(ProfilerBase):
                 f"{self.output_path}.", self._DUMP_TIMEOUT, self._profiler_state.stop_event
             )
             stdout, stderr = self._read_process_standard_outputs()
-            logger.debug("PyPerf dump output", stdout=stdout, stderr=stderr)
+            
+            # Handle stderr processing using helper methods
+            if stderr:
+                stderr_str = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else stderr
+                self._process_pyperf_stderr(stderr_str, stdout)
+            else:
+                logger.debug("PyPerf dump output", stdout=stdout, stderr="")
             return output
         except TimeoutError:
             # error flow :(
@@ -357,39 +383,24 @@ class PythonEbpfProfiler(ProfilerBase):
             process = self.process  # save it
             exit_status, stderr, stdout = self._terminate()
             assert exit_status is not None, "PyPerf didn't exit after _terminate()!"
-            if process is not None:
-                assert isinstance(process.args, list) and all(
-                    isinstance(s, str) for s in process.args
-                ), process.args  # mypy
-                cmd_args = [str(s) for s in process.args]
-            else:
-                cmd_args = []
-            raise PythonEbpfError(exit_status, cmd_args, stdout, stderr)
+            assert isinstance(process.args, list) and all(
+                isinstance(s, str) for s in process.args
+            ), process.args  # mypy
+            
+            # Check if the error is related to deleted libraries before raising
+            if stderr:
+                stderr_str = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else stderr
+                if self._is_deleted_library_error(stderr_str):
+                    deleted_lib_count = stderr_str.count(self._PYTHON_SETUP_FAILURE)
+                    logger.info(f"PyPerf failed due to {deleted_lib_count} processes with deleted libraries - "
+                              f"this is expected in containerized/temporary environments and doesn't indicate a real error")
+            
+            raise PythonEbpfError(exit_status, process.args, stdout, stderr)
 
     def snapshot(self) -> ProcessToProfileData:
-        # Add health check at the beginning
-        if not self._check_process_health():
-            logger.error("PyPerf process is not running")
-            return {}
-
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException()
-
-        collapsed_path = None
-        try:
-            collapsed_path = self._dump()
-        except (BrokenPipeError, ProcessLookupError, OSError) as e:
-            # Process crashed during operation
-            logger.error(f"PyPerf process crashed or became unavailable during snapshot: {type(e).__name__}: {e}")
-            if self.process is not None:
-                # Clean up the global reference
-                cleanup_process_reference(self.process)
-                self.process = None
-
-        if collapsed_path is None:
-            logger.error("collapsed_path is None, cannot parse output")
-            return {}
-
+        collapsed_path = self._dump()
         try:
             collapsed_text = collapsed_path.read_text()
         finally:
@@ -427,7 +438,27 @@ class PythonEbpfProfiler(ProfilerBase):
         if self.is_running():
             assert self.process is not None  # for mypy
             self.process.terminate()  # okay to call even if process is already dead
-            exit_status, stdout, stderr = reap_process(self.process)
+            
+            try:
+                exit_status, stdout, stderr = reap_process(self.process)
+            except AttributeError as e:
+                # Check if this is the specific case where cleanup_completed_processes() has already
+                # processed our process and closed its pipes, corrupting the internal state for communicate()
+                pipes_already_closed = (
+                    (self.process.stdout and self.process.stdout.closed) or
+                    (self.process.stderr and self.process.stderr.closed)
+                )
+                if pipes_already_closed:
+                    # This happens when cleanup_completed_processes() has already processed 
+                    # our process and closed its pipes. This is actually okay - the process
+                    # cleanup has already been handled by the global cleanup mechanism.
+                    logger.debug("PyPerf process was already cleaned up by global subprocess cleanup - this is expected")
+                    exit_status = self.process.poll()  # Get final exit status if available
+                    # stdout/stderr remain empty as they were already processed
+                else:
+                    # Re-raise if it's a different AttributeError
+                    raise
+            
             self.process = None
 
         stdout = stdout.decode() if isinstance(stdout, bytes) else stdout

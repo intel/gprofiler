@@ -18,7 +18,7 @@ import datetime
 import logging
 import socket
 import threading
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Optional
 
 import configargparse
 import requests
@@ -26,7 +26,10 @@ import requests
 from gprofiler.dynamic_profiling_management.ad_hoc import AdhocProfilerSlot
 from gprofiler.dynamic_profiling_management.command_control import CommandManager, ProfilingCommand
 from gprofiler.dynamic_profiling_management.continuous import ContinuousProfilerSlot
+from gprofiler.metadata.heartbeat_metadata import HeartbeatMetadataCollector
 from gprofiler.metadata.system_metadata import get_hostname
+from gprofiler.metrics_publisher import RESPONSE_TYPE_FAILURE, RESPONSE_TYPE_SUCCESS, MetricsPublisher
+from gprofiler.profilers.pmu_manager import get_pmu_manager
 
 logger = logging.getLogger(__name__)
 
@@ -45,24 +48,101 @@ class HeartbeatClient:
         service_name: str,
         server_token: str,
         verify: bool = True,
+        tls_client_cert: Optional[str] = None,
+        tls_client_key: Optional[str] = None,
+        tls_ca_bundle: Optional[str] = None,
+        tls_cert_refresh_enabled: bool = False,
+        tls_cert_refresh_interval: int = 21600,
+        workload_name_labels: Optional[List[str]] = None,
+        workload_kind_labels: Optional[List[str]] = None,
     ):
         self.api_server = api_server.rstrip("/")
         self.service_name = service_name
         self.server_token = server_token
         self.verify = verify
+        self.tls_client_cert = tls_client_cert
+        self.tls_client_key = tls_client_key
+        self.tls_ca_bundle = tls_ca_bundle
+        self.tls_cert_refresh_enabled = tls_cert_refresh_enabled
+        self.tls_cert_refresh_interval = tls_cert_refresh_interval
         self.hostname = get_hostname()
         self.ip_address = self._get_local_ip()
         self.last_command_id: Optional[str] = None
         self.received_command_ids: set = set()
         self.executed_command_ids: set = set()
         self.max_command_history = 1000
+        self._refresh_thread: Optional[threading.Thread] = None
+        self._refresh_stop_event = threading.Event()
 
-        self.session = requests.Session()
+        self._init_session()
+        self.pmu_manager = get_pmu_manager()
+        self.heartbeat_metadata_collector = HeartbeatMetadataCollector(
+            workload_name_labels=workload_name_labels,
+            workload_kind_labels=workload_kind_labels,
+        )
 
         if self.server_token:
             self.session.headers.update(
                 {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
             )
+
+        if self.tls_cert_refresh_enabled and (self.tls_client_cert or self.tls_ca_bundle):
+            self._start_cert_refresh_thread()
+
+    # --- TLS session management ---
+
+    def _init_session(self) -> None:
+        self.session = requests.Session()
+        if self.tls_ca_bundle:
+            self.session.verify = self.tls_ca_bundle
+        else:
+            self.session.verify = self.verify
+        if self.tls_client_cert and self.tls_client_key:
+            self.session.cert = (self.tls_client_cert, self.tls_client_key)
+            logger.debug(f"HeartbeatClient: mTLS enabled with client cert: {self.tls_client_cert}")
+        elif self.tls_client_cert or self.tls_client_key:
+            logger.warning(
+                "HeartbeatClient: Both --tls-client-cert and --tls-client-key must be provided for mTLS. "
+                "Ignoring partial configuration."
+            )
+
+    def _refresh_session(self) -> None:
+        old_session = self.session
+        try:
+            logger.debug("HeartbeatClient: Refreshing TLS session to reload certificates")
+            self._init_session()
+            if self.server_token:
+                self.session.headers.update(
+                    {"Authorization": f"Bearer {self.server_token}", "Content-Type": "application/json"}
+                )
+            old_session.close()
+            logger.info("HeartbeatClient: TLS session refreshed successfully")
+        except Exception as e:
+            self.session = old_session
+            logger.error(f"HeartbeatClient: Failed to refresh TLS session: {e}. Will retry on next interval.")
+
+    def _cert_refresh_loop(self) -> None:
+        logger.info(
+            f"HeartbeatClient: Certificate refresh thread started (interval: {self.tls_cert_refresh_interval}s)"
+        )
+        while not self._refresh_stop_event.wait(self.tls_cert_refresh_interval):
+            self._refresh_session()
+        logger.debug("HeartbeatClient: Certificate refresh thread stopped")
+
+    def _start_cert_refresh_thread(self) -> None:
+        if self._refresh_thread is None or not self._refresh_thread.is_alive():
+            self._refresh_thread = threading.Thread(
+                target=self._cert_refresh_loop, daemon=True, name="HeartbeatClient-CertRefresh"
+            )
+            self._refresh_thread.start()
+
+    def stop_cert_refresh(self) -> None:
+        if self._refresh_thread and self._refresh_thread.is_alive():
+            logger.debug("HeartbeatClient: Stopping certificate refresh thread")
+            self._refresh_stop_event.set()
+            self._refresh_thread.join(timeout=5)
+            if self._refresh_thread.is_alive():
+                logger.warning("HeartbeatClient: Certificate refresh thread did not stop gracefully")
 
     # --- Networking helpers ---
 
@@ -71,7 +151,7 @@ class HeartbeatClient:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                return cast(str, s.getsockname()[0])
+                return s.getsockname()[0]
         except Exception:
             return "127.0.0.1"
 
@@ -79,6 +159,8 @@ class HeartbeatClient:
 
     def send_heartbeat(self) -> Optional[Dict[str, Any]]:
         try:
+            perf_supported_events = self.pmu_manager.get_supported_events()
+            inventory_metadata = self.heartbeat_metadata_collector.collect()
             heartbeat_data = {
                 "ip_address": self.ip_address,
                 "hostname": self.hostname,
@@ -88,22 +170,37 @@ class HeartbeatClient:
                 "timestamp": datetime.datetime.now().isoformat(),
                 "received_command_ids": list(self.received_command_ids),
                 "executed_command_ids": list(self.executed_command_ids),
+                "perf_supported_events": perf_supported_events,
+                **inventory_metadata,
             }
             url = f"{self.api_server}/api/metrics/heartbeat"
-            response = self.session.post(url, json=heartbeat_data, timeout=30, verify=self.verify)
+            response = self.session.post(url, json=heartbeat_data, timeout=30)
 
             if response.status_code == 200:
+                MetricsPublisher.get_instance().send_sli_metric(
+                    response_type=RESPONSE_TYPE_SUCCESS, method_name="send_heartbeat"
+                )
                 result = response.json()
                 if result.get("success") and result.get("profiling_command"):
                     logger.info(f"Received profiling command from server: {result.get('command_id')}")
-                    return cast(Dict[str, Any], result)
+                    return result
                 logger.debug("Heartbeat successful, no pending commands")
                 return None
             else:
                 logger.warning(f"Heartbeat failed with status {response.status_code}: {response.text}")
+                MetricsPublisher.get_instance().send_sli_metric(
+                    response_type=RESPONSE_TYPE_FAILURE,
+                    method_name="send_heartbeat",
+                    extra_tags={"status_code": response.status_code},
+                )
                 return None
         except Exception as e:
             logger.error(f"Failed to send heartbeat: {e}")
+            MetricsPublisher.get_instance().send_sli_metric(
+                response_type=RESPONSE_TYPE_FAILURE,
+                method_name="send_heartbeat",
+                extra_tags={"error": str(e)},
+            )
             return None
 
     def send_command_completion(
@@ -124,7 +221,7 @@ class HeartbeatClient:
                 "results_path": results_path,
             }
             url = f"{self.api_server}/api/metrics/command_completion"
-            response = self.session.post(url, json=completion_data, timeout=30, verify=self.verify)
+            response = self.session.post(url, json=completion_data, timeout=30)
             if response.status_code == 200:
                 logger.info(f"Reported command completion for {command_id} (status={status})")
                 return True
@@ -203,7 +300,7 @@ class DynamicGProfilerManager:
 
                 # Step 3: Process next queued command
                 next_cmd = self.command_manager.get_next_command()
-                if next_cmd is not None and self._should_process(next_cmd):
+                if self._should_process(next_cmd):
                     self._process_command(next_cmd)
 
                 self.stop_event.wait(self.heartbeat_interval)
@@ -236,7 +333,14 @@ class DynamicGProfilerManager:
             timestamp=datetime.datetime.now(),
             is_paused=False,
         )
-        self.command_manager.enqueue_command(cmd)
+        if not self.command_manager.enqueue_command(cmd):
+            logger.warning(f"Command {command_id} rejected: queue is full")
+            self.heartbeat_client.send_command_completion(
+                command_id=command_id,
+                status="failed",
+                execution_time=0,
+                error_message="Agent command queue is full",
+            )
 
     def _process_command(self, cmd: ProfilingCommand) -> None:
         if cmd.command_type == "stop":
@@ -269,10 +373,8 @@ class DynamicGProfilerManager:
                 self.continuous.start(cmd.profiling_command, cmd.command_id)
                 started = True
             elif self.continuous.can_be_paused():
-                continuous_cmd = self.continuous.command
-                if continuous_cmd is not None:
-                    logger.info("Replacing current continuous profiler with command %s", cmd.command_id)
-                    self.command_manager.pause_command(continuous_cmd.command_id)
+                logger.info("Replacing current continuous profiler with command %s", cmd.command_id)
+                self.command_manager.pause_command(self.continuous.command.command_id)
                 self.continuous.stop()
                 self.continuous.start(cmd.profiling_command, cmd.command_id)
                 started = True
@@ -296,13 +398,11 @@ class DynamicGProfilerManager:
                 started = True
             elif self.continuous.can_be_paused() and not self.adhoc.is_running():
                 # Time-slice path: pause continuous, run ad-hoc, continuous re-queued
-                continuous_cmd = self.continuous.command
-                if continuous_cmd is not None:
-                    logger.info(
-                        "Pausing continuous profiler for ad-hoc command %s (overlapping types)",
-                        cmd.command_id,
-                    )
-                    self.command_manager.pause_command(continuous_cmd.command_id)
+                logger.info(
+                    "Pausing continuous profiler for ad-hoc command %s (overlapping types)",
+                    cmd.command_id,
+                )
+                self.command_manager.pause_command(self.continuous.command.command_id)
                 self.continuous.stop()
                 self.adhoc.start(cmd.profiling_command, cmd.command_id)
                 started = True

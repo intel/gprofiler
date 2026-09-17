@@ -12,6 +12,7 @@ netifaces==0.11.0; sys.platform == "win32"
 WMI==1.5.1; sys.platform == "win32"
 ./granulate-utils/
 humanfriendly==10.0
+bitmath==2.1.1
 beautifulsoup4==4.13.3
 backports.tarfile==1.2.0
 cpuid==0.0.11 ; platform_machine == "x86_64"  # For CPUID instruction access to detect hypervisor and CPU model (x86 only)
