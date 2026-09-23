@@ -15,8 +15,10 @@
 #
 
 from collections import Counter, defaultdict
+from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from threading import Lock
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from gprofiler.gprofiler_types import ProcessToStackSampleCounters
 from gprofiler.log import get_logger_adapter
@@ -51,19 +53,19 @@ class IaprofParser:
         self._bad_line_count = 0
         self._bad_lines: List[str] = []
 
-    def parse_line(self, line: str) -> None:
+    def parse_line(self, line: str) -> Optional[int]:
         line = line.rstrip("\n")
         if not line:
-            return
+            return None
 
         record_type = line.partition("\t")[0]
         if record_type == "interval":
             self._kernel = None
             try:
-                self._parse_interval(line)
+                return self._parse_interval(line)
             except ValueError:
                 self._record_bad_line(line)
-            return
+            return None
 
         try:
             if record_type == "string":
@@ -80,7 +82,7 @@ class IaprofParser:
         except (KeyError, ValueError):
             self._record_bad_line(line)
 
-        return
+        return None
 
     def take_snapshot(self) -> ProcessToStackSampleCounters:
         profiles = self._profiles
@@ -102,10 +104,11 @@ class IaprofParser:
             raise ValueError
         self._strings[parsed_id] = value
 
-    def _parse_interval(self, line: str) -> None:
+    def _parse_interval(self, line: str) -> int:
         _, interval, timestamp = line.split("\t")
-        int(interval)
+        parsed_interval = int(interval)
         float(timestamp)
+        return parsed_interval
 
     def _parse_metric(self, line: str) -> None:
         _, _, value = line.split("\t")
@@ -163,3 +166,58 @@ class IaprofParser:
         self._bad_line_count += 1
         if len(self._bad_lines) < 8:
             self._bad_lines.append(line)
+
+
+class IaprofOutputReader:
+    def __init__(self) -> None:
+        self._parser = IaprofParser()
+        self._lock = Lock()
+        self._ready: Future[int] = Future()
+        self._snapshot: Optional[Future[ProcessToStackSampleCounters]] = None
+        self._error: Optional[BaseException] = None
+
+    def read(self, lines: Iterable[str]) -> None:
+        try:
+            for line in lines:
+                interval = self._parser.parse_line(line)
+                if interval is not None:
+                    if not self._ready.done():
+                        self._ready.set_result(interval)
+                    self._publish_snapshot()
+        except BaseException as error:
+            self._finish(error)
+        else:
+            self._finish(EOFError("iaprof output closed"))
+
+    def wait_until_ready(self, timeout: float) -> int:
+        return self._ready.result(timeout)
+
+    def request_snapshot(self) -> Future[ProcessToStackSampleCounters]:
+        snapshot: Future[ProcessToStackSampleCounters] = Future()
+        with self._lock:
+            if self._snapshot is not None:
+                raise RuntimeError("iaprof snapshot already requested")
+            if self._error is None:
+                self._snapshot = snapshot
+            else:
+                snapshot.set_exception(self._error)
+        return snapshot
+
+    def _publish_snapshot(self) -> None:
+        with self._lock:
+            if self._snapshot is None:
+                return
+            profiles = self._parser.take_snapshot()
+            snapshot = self._snapshot
+            self._snapshot = None
+        snapshot.set_result(profiles)
+
+    def _finish(self, error: BaseException) -> None:
+        with self._lock:
+            self._error = error
+            snapshot = self._snapshot
+            self._snapshot = None
+        if not self._ready.done():
+            self._ready.set_exception(error)
+        if snapshot is not None and not snapshot.done():
+            snapshot.set_exception(error)
