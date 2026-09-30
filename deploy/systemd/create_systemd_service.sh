@@ -21,6 +21,11 @@ set -ueo pipefail
 if [ -z "${GPROFILER_TOKEN}" ]; then echo "missing GPROFILER_TOKEN!"; exit 1; fi
 if [ -z "${GPROFILER_SERVICE}" ]; then echo "missing GPROFILER_SERVICE!"; exit 1; fi
 
+# Map user-facing env vars to gprofiler's configargparse env var names
+# (auto_env_var_prefix="gprofiler_" + dest name: server_token, service_name)
+GPROFILER_SERVER_TOKEN="${GPROFILER_TOKEN}"
+GPROFILER_SERVICE_NAME="${GPROFILER_SERVICE}"
+
 HERE=$(dirname -- "$0")
 UNIT_NAME=granulate-gprofiler.service
 TEMPLATE=$HERE/$UNIT_NAME.template
@@ -32,7 +37,7 @@ fi
 
 if [ -f "$UNIT_NAME" ]; then echo "${UNIT_NAME} already exists, please remove it and re-run (and disable the service if installed from symlink)"; exit 1; fi
 
-sed "s/Environment=GPROFILER_TOKEN=/&${GPROFILER_TOKEN}/g;s/Environment=GPROFILER_SERVICE=/&${GPROFILER_SERVICE}/g" < "$TEMPLATE" > $UNIT_NAME
+sed "s/Environment=GPROFILER_SERVER_TOKEN=/&${GPROFILER_SERVER_TOKEN}/g;s/Environment=GPROFILER_SERVICE_NAME=/&${GPROFILER_SERVICE_NAME}/g" < "$TEMPLATE" > $UNIT_NAME
 
 FULL_SERVICE_FILE_PATH=$(realpath -s "$UNIT_NAME")
 
