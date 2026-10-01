@@ -44,17 +44,15 @@ def get_profilers(
                     logger.warning("--java-collect-thread-names is ignored because Java profiling is disabled")
                 continue
 
+            if profiling_mode not in profiler_config.supported_profiling_modes:
+                logger.debug(f"Disabling {profiler_name} because it doesn't support profiling mode {profiling_mode!r}")
+                continue
+
             supported_archs = (
                 profiler_config.supported_windows_archs if is_windows() else profiler_config.supported_archs
             )
             if arch not in supported_archs:
                 logger.warning(f"Disabling {profiler_name} because it doesn't support this architecture ({arch})")
-                continue
-
-            if profiling_mode not in profiler_config.supported_profiling_modes:
-                logger.warning(
-                    f"Disabling {profiler_name} because it doesn't support profiling mode {profiling_mode!r}"
-                )
                 continue
 
             profiler_kwargs = profiler_init_kwargs.copy()
