@@ -119,6 +119,8 @@ class IaprofProfiler(SystemProfilerBase):
         self._iaprof.stop()
 
     def snapshot(self) -> ProcessToProfileData:
+        self._iaprof.restart_if_not_running()
+
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException
 

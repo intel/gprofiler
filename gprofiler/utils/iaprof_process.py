@@ -143,6 +143,16 @@ class IaprofProcess:
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
+    def restart(self) -> None:
+        self.stop()
+        self.start()
+
+    def restart_if_not_running(self) -> None:
+        if not self.is_running():
+            logger.warning(f"iaprof not running (unexpectedly), restarting... "
+            "kernels loaded before the restart may not be attributed")
+            self.restart()
+
     @property
     def stderr(self) -> str:
         with self._stderr_lock:
