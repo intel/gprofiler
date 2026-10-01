@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 
+import concurrent.futures
 import signal
 from collections import deque
 from subprocess import Popen, TimeoutExpired
@@ -96,12 +97,15 @@ class IaprofProcess:
             raise
 
     def snapshot(self, timeout: float) -> ProcessToStackSampleCounters:
-        if self._process is None or self._reader is None:
+        process = self._process
+        if process is None or self._reader is None:
             raise RuntimeError("iaprof is not started")
         try:
             return self._reader.request_snapshot().result(timeout)
+        except concurrent.futures.TimeoutError as error:
+            process.kill()
+            raise IaprofProcessError(self._error_message("iaprof snapshot timed out")) from error
         except Exception as error:
-            self._stop_after_failure()
             raise IaprofProcessError(self._error_message("iaprof snapshot failed")) from error
 
     def stop(self) -> None:
@@ -150,7 +154,7 @@ class IaprofProcess:
     def restart_if_not_running(self) -> None:
         if not self.is_running():
             logger.warning(
-                f"iaprof not running (unexpectedly), restarting... "
+                "iaprof not running (unexpectedly), restarting... "
                 "kernels loaded before the restart may not be attributed"
             )
             self.restart()

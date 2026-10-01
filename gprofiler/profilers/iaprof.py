@@ -26,7 +26,7 @@ from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.profiler_base import SystemProfilerBase
 from gprofiler.profilers.registry import ProfilerArgument, register_profiler
 from gprofiler.utils import run_process
-from gprofiler.utils.iaprof_process import IaprofProcess
+from gprofiler.utils.iaprof_process import IaprofProcess, IaprofProcessError
 
 IAPROF_INTERVAL_MS = 10
 IAPROF_SNAPSHOT_TIMEOUT = 5
@@ -122,7 +122,13 @@ class IaprofProfiler(SystemProfilerBase):
         if self._profiler_state.stop_event.wait(self._duration):
             raise StopEventSetException
 
-        stacks_by_pid = self._iaprof.snapshot(IAPROF_SNAPSHOT_TIMEOUT)
+        try:
+            stacks_by_pid = self._iaprof.snapshot(IAPROF_SNAPSHOT_TIMEOUT)
+        except IaprofProcessError:
+            if self._profiler_state.stop_event.is_set():
+                raise StopEventSetException
+            raise
+
         return {
             pid: ProfileData(stacks, None, None, self._profiler_state.get_container_name(pid))
             for pid, stacks in stacks_by_pid.items()
