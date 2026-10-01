@@ -129,9 +129,7 @@ while True:
     assert not process.is_running()
 
 
-def test_iaprof_process_snapshot_timeout_stops_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_iaprof_process_snapshot_timeout_stops_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _disable_pdeathsigger(monkeypatch)
     executable = tmp_path / "iaprof"
     _write_executable(

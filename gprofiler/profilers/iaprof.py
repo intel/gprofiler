@@ -106,9 +106,7 @@ class IaprofProfiler(SystemProfilerBase):
         version_output = result.stdout.decode().strip() or result.stderr.decode().strip()
         version = Version(version_output)
         if version < self.MINIMUM_SUPPORTED_VERSION:
-            raise RuntimeError(
-                f"iaprof {version} is unsupported; minimum version is {self.MINIMUM_SUPPORTED_VERSION}"
-            )
+            raise RuntimeError(f"iaprof {version} is unsupported; minimum version is {self.MINIMUM_SUPPORTED_VERSION}")
         return str(version)
 
     def start(self) -> None:
