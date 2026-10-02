@@ -17,7 +17,7 @@
 import subprocess
 import sys
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any, List
 
 import pytest
@@ -129,29 +129,17 @@ while True:
     assert not process.is_running()
 
 
-def test_iaprof_process_snapshot_timeout_stops_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_iaprof_process_snapshot_timeout_kills_child(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _disable_pdeathsigger(monkeypatch)
     executable = tmp_path / "iaprof"
     _write_executable(
         executable,
         """
-import signal
-import sys
 import time
 
-running = True
-
-
-def stop(*args):
-    global running
-    running = False
-
-
-signal.signal(signal.SIGINT, stop)
 print("interval\\t0\\t1.0", flush=True)
-while running:
-    time.sleep(0.01)
-print("stopped", file=sys.stderr, flush=True)
+while True:
+    time.sleep(1)
 """,
     )
 
@@ -164,8 +152,48 @@ print("stopped", file=sys.stderr, flush=True)
     )
     process.start()
 
-    with pytest.raises(IaprofProcessError, match="iaprof snapshot failed"):
+    with pytest.raises(IaprofProcessError, match="iaprof snapshot timed out"):
         process.snapshot(timeout=0.5)
 
+    deadline = monotonic() + 2
+    while process.is_running() and monotonic() < deadline:
+        sleep(0.01)
     assert not process.is_running()
-    assert "stopped" in process.stderr
+    process.stop()
+
+
+def test_iaprof_process_restarts_after_exit(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    _disable_pdeathsigger(monkeypatch)
+    executable = tmp_path / "fake-iaprof"
+    marker = tmp_path / "started-once"
+    _write_executable(
+        executable,
+        f"""
+import pathlib
+import signal
+import sys
+import time
+
+marker = pathlib.Path({str(marker)!r})
+print("interval\\t0\\t1.0", flush=True)
+if not marker.exists():
+    marker.touch()
+    print("device lost", file=sys.stderr, flush=True)
+    sys.exit(3)
+signal.signal(signal.SIGINT, lambda *args: sys.exit(0))
+while True:
+    time.sleep(0.01)
+    print("interval\\t0\\t1.0", flush=True)
+""",
+    )
+    process = IaprofProcess(str(executable), 10, 100, startup_timeout=2, stop_timeout=1)
+    process.start()
+
+    with pytest.raises(IaprofProcessError, match="iaprof snapshot failed"):
+        process.snapshot(timeout=2)
+
+    process.restart_if_not_running()
+    assert process.is_running()
+    assert process.snapshot(timeout=2) == {}
+    process.stop()
+    assert not process.is_running()

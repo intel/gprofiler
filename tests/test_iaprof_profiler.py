@@ -31,6 +31,7 @@ from gprofiler.main import parse_cmd_args
 from gprofiler.profiler_state import ProfilerState
 from gprofiler.profilers.factory import get_profilers
 from gprofiler.profilers.iaprof import IAPROF_SNAPSHOT_TIMEOUT, IaprofProfiler, frequency_to_iaprof_interval
+from gprofiler.utils.iaprof_process import IaprofProcessError
 
 
 def _make_profiler(profiler_state: ProfilerState) -> Tuple[IaprofProfiler, Mock]:
@@ -131,6 +132,19 @@ def test_iaprof_profiler_snapshot_stops_with_gprofiler(profiler_state: ProfilerS
         profiler.snapshot()
 
     process.snapshot.assert_not_called()
+
+
+def test_iaprof_profiler_snapshot_failure_during_stop(profiler_state: ProfilerState) -> None:
+    profiler, process = _make_profiler(profiler_state)
+
+    def interrupted_snapshot(timeout: float) -> None:
+        profiler_state.stop_event.set()
+        raise IaprofProcessError("iaprof snapshot failed")
+
+    process.snapshot.side_effect = interrupted_snapshot
+
+    with pytest.raises(StopEventSetException):
+        profiler.snapshot()
 
 
 def test_iaprof_profiler_selected_for_gpu_mode(profiler_state: ProfilerState) -> None:
