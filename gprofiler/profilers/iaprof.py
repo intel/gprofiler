@@ -28,7 +28,6 @@ from gprofiler.profilers.registry import ProfilerArgument, register_profiler
 from gprofiler.utils import run_process
 from gprofiler.utils.iaprof_process import IaprofProcess, IaprofProcessError
 
-IAPROF_INTERVAL_MS = 10
 IAPROF_SNAPSHOT_TIMEOUT = 5
 
 
