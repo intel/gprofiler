@@ -155,15 +155,12 @@ def dotnet_command_line(path: Path) -> List[str]:
         ["cp", str(CONTAINERS_DIRECTORY / "dotnet/Fibonacci.cs"), str(class_path / "Fibonacci.cs")], check=True
     )
 
-    # Create a minimal .csproj file that references Fibonacci.cs
+    # Create a minimal .csproj file - SDK auto-discovers .cs files in project directory
     csproj_content = """<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="Fibonacci.cs" />
-  </ItemGroup>
 </Project>
 """
     (class_path / "Fibonacci.csproj").write_text(csproj_content)
