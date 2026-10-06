@@ -137,6 +137,8 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
         self._safe_remove(self._ps_raw_csv_filename)
         self._safe_remove(self._ps_summary_csv_filename)
         self._safe_remove(self._ps_summary_html_filename)
+        self._safe_remove(self._ps_latest_csv_filename)
+        self._safe_remove(self._ps_latest_html_filename)
 
     def _get_hw_metrics_dict(self) -> Optional[dict]:
         summary_dict = {}
