@@ -387,7 +387,7 @@ def touch_path(path: str, mode: int) -> None:
         # O_CREAT creates the file if it doesn't exist.
         # O_WRONLY for write access.
         # Mode argument to os.open() is affected by umask, so we use fchmod() below.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | _O_NOFOLLOW, mode)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | _O_NOFOLLOW | os.O_NONBLOCK, mode)
     except OSError as e:
         if e.errno == errno.ELOOP:
             raise Exception(f"Refusing to touch {path}: symlinks are not allowed for security reasons")
