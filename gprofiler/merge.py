@@ -80,20 +80,6 @@ def _make_profile_metadata(
         "htmlblob": hwmetrics.metrics_html if hwmetrics is not None else None,
         "flamegraph_html": flamegraph_html,
     }
-
-    # Add sampling event information if present in metadata
-    if "sampling_event" in metadata:
-        profile_metadata["sampling_event"] = metadata["sampling_event"]
-        profile_metadata["sampling_mode"] = metadata.get("sampling_mode", "frequency")
-
-        if metadata.get("sampling_mode") == "period":
-            profile_metadata["sampling_period"] = metadata.get("sampling_period")
-        else:
-            profile_metadata["sampling_frequency"] = metadata.get("sampling_frequency")
-
-        if "precise_modifier" in metadata:
-            profile_metadata["precise_modifier"] = metadata["precise_modifier"]
-
     return "# " + json.dumps(profile_metadata)
 
 
@@ -162,10 +148,7 @@ def _enrich_pid_stacks(
 
 
 def _enrich_and_finalize_stack(
-    stack: str,
-    count: int,
-    enrichment_options: EnrichmentOptions,
-    enrich_data: PidStackEnrichment,
+    stack: str, count: int, enrichment_options: EnrichmentOptions, enrich_data: PidStackEnrichment
 ) -> str:
     """
     Attach the enrichment data collected for the PID of this stack.
@@ -239,10 +222,7 @@ def concatenate_profiles(
 
     for pid, profile in process_profiles.items():
         enrich_data = _enrich_pid_stacks(
-            profile,
-            enrichment_options,
-            application_metadata,
-            external_app_metadata.get(pid),
+            profile, enrichment_options, application_metadata, external_app_metadata.get(pid)
         )
         for stack, count in profile.stacks.items():
             lines.append(_enrich_and_finalize_stack(stack, count, enrichment_options, enrich_data))
@@ -291,24 +271,15 @@ def merge_profiles(
         profile_samples_count = sum(profile.stacks.values())
         assert profile_samples_count > 0
 
-        if (
-            process_perf is not None
-            and perf_samples_count > 0
-            and not ProfilingErrorStack.is_error_stack(profile.stacks)
-        ):
+        if process_perf is not None and perf_samples_count > 0 and ProfilingErrorStack.is_error_stack(profile.stacks):
+            # runtime profiler returned an error stack; extend it with perf profiler stacks for the pid
+            profile.stacks = ProfilingErrorStack.attach_error_to_stacks(process_perf.stacks, profile.stacks)
+        elif perf_samples_count > 0:
             # do the scaling by the ratio of samples: samples we received from perf for this process,
             # divided by samples we received from the runtime profiler of this process.
             ratio = perf_samples_count / profile_samples_count
             profile.stacks = scale_sample_counts(profile.stacks, ratio)
-        elif process_perf is not None and perf_samples_count > 0 and ProfilingErrorStack.is_error_stack(profile.stacks):
-            # runtime profiler returned an error stack; attach error information to perf profiler stacks
-            profile.stacks = ProfilingErrorStack.attach_error_to_stacks(process_perf.stacks, profile.stacks)
-        elif perf_samples_count == 0 and not ProfilingErrorStack.is_error_stack(profile.stacks):
-            # perf has no samples, but runtime profiler has valid samples - preserve them unscaled
-            pass
-        else:
-            # perf has no samples and runtime profiler has error stack - discard the error stack
-            profile.stacks = StackToSampleCount()
+        # else: perf_samples_count == 0, so preserve runtime profiler stacks unscaled
 
         if process_perf is not None:
             if profile.container_name in [None, ""]:

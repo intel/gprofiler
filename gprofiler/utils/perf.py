@@ -27,7 +27,7 @@ from gprofiler.exceptions import CalledProcessError, PerfNoSupportedEvent
 from gprofiler.gprofiler_types import ProcessToStackSampleCounters
 from gprofiler.log import get_logger_adapter
 from gprofiler.utils import run_process
-from gprofiler.utils.perf_process import PerfProcess, perf_path
+from gprofiler.utils.perf_process import PerfProcess, perf_path, _is_pid_related_error
 
 logger = get_logger_adapter(__name__)
 
@@ -69,7 +69,8 @@ class SupportedPerfEvent(Enum):
 
 
 def discover_appropriate_perf_event(
-    tmp_dir: Path, stop_event: Event, pids: Optional[List[Process]] = None
+    tmp_dir: Path, stop_event: Event, pids: Optional[List[Process]] = None,
+    use_cgroups: bool = False, max_cgroups: int = 50
 ) -> SupportedPerfEvent:
     """
     Get the appropriate event should be used by `perf record`.
@@ -80,9 +81,17 @@ def discover_appropriate_perf_event(
     actually collects samples, and make changes only if it doesn't.
 
     :param tmp_dir: working directory of this function
+    :param stop_event: event to signal stopping
+    :param pids: optional list of processes to profile (for PID-based profiling)
+    :param use_cgroups: whether to use cgroup-based profiling
+    :param max_cgroups: maximum number of cgroups to profile
     :return: `perf record` extra arguments to use (e.g. `["-e", "cpu-clock"]`)
     """
 
+    segfault_count = 0
+    pid_failure_count = 0
+    total_events = len(SupportedPerfEvent)
+    
     for event in SupportedPerfEvent:
         try:
             current_extra_args = event.perf_extra_args() + [
@@ -90,6 +99,10 @@ def discover_appropriate_perf_event(
                 "sleep",
                 "0.5",
             ]  # `sleep 0.5` is enough to be certain some samples should've been collected.
+            # For discovery, always use system-wide profiling so that `sleep 0.5` is captured
+            # regardless of the final profiling mode (pid-based or cgroup-based).
+            discovery_use_cgroups = False
+
             perf_process = PerfProcess(
                 frequency=11,
                 stop_event=stop_event,
@@ -97,24 +110,68 @@ def discover_appropriate_perf_event(
                 is_dwarf=False,
                 inject_jit=False,
                 extra_args=current_extra_args,
-                processes_to_profile=pids,
+                processes_to_profile=None,  # None -> system-wide (-a), placed before -- by _get_perf_cmd
                 switch_timeout_s=15,
+                use_cgroups=discovery_use_cgroups,
+                max_cgroups=max_cgroups,
             )
             perf_process.start()
             # Use streaming parsing instead of loading all into memory
-            parsed_perf_script = parse_perf_script_from_iterator(perf_process.wait_and_script(), insert_dso_name=False)
+            perf_output = perf_process.wait_and_script()
+            logger.debug(f"Perf event {event.name} discovery: parsing output stream")
+            parsed_perf_script = parse_perf_script_from_iterator(perf_output, insert_dso_name=False)
             if len(parsed_perf_script) > 0:
+                logger.debug(f"Perf event {event.name} discovery successful, found {len(parsed_perf_script)} samples")
                 # `perf script` isn't empty, we'll use this event.
                 return event
-        except Exception:  # pylint: disable=broad-except
-            logger.warning(
-                "Failed to collect samples for perf event",
-                exc_info=True,
-                perf_event=event.name,
-            )
+            else:
+                logger.debug(f"Perf event {event.name} discovery failed, no samples collected")
+        except Exception as e:  # pylint: disable=broad-except
+            # Check if this was a segfault in perf script, log it appropriately
+            exc_name = type(e).__name__
+            error_message = str(e)
+            
+            # Check if this looks like a segfault-related error 
+            if "CalledProcessError" in exc_name and hasattr(e, 'returncode') and getattr(e, 'returncode', 0) < 0:
+                segfault_count += 1
+                logger.warning(
+                    f"Perf event {event.name} failed with signal {-getattr(e, 'returncode', 0)}, "
+                    f"likely segfault. This is known to happen on some GPU machines.",
+                    perf_event=event.name,
+                )
+            # Check if this is a PID-related failure  
+            elif pids is not None and _is_pid_related_error(error_message):
+                pid_failure_count += 1
+                logger.warning(
+                    f"Perf event {event.name} failed due to target process issues. "
+                    f"One or more target processes may have exited during discovery. "
+                    f"Error: {error_message}",
+                    perf_event=event.name,
+                )
+            else:
+                logger.warning(
+                    f"Failed to collect samples for perf event ({exc_name})",
+                    exc_info=True,
+                    perf_event=event.name,
+                    )
         finally:
             perf_process.stop()
 
+    # If all events failed due to segfaults, provide a specific error message
+    if segfault_count == total_events:
+        logger.critical(
+            f"All perf events failed with segfaults ({segfault_count}/{total_events}). "
+            f"This is a known issue on some GPU machines. "
+            f"Consider running with '--perf-mode disabled' to avoid using perf."
+        )
+    # If all events failed due to PID issues, provide a specific error message
+    elif pid_failure_count == total_events:
+        logger.critical(
+            f"All perf events failed due to target process issues ({pid_failure_count}/{total_events}). "
+            f"Target processes may have exited during discovery. "
+            f"Consider using system-wide profiling or '--perf-mode disabled' to avoid using perf."
+        )
+    
     raise PerfNoSupportedEvent
 
 
@@ -183,7 +240,6 @@ def parse_perf_script_from_iterator(
     pid_to_collapsed_stacks_counters: ProcessToStackSampleCounters = defaultdict(Counter)
 
     current_sample_lines: List[str] = []
-    sample_count = 0
 
     for line in perf_iterator:
         # Empty line indicates end of sample block
@@ -192,7 +248,6 @@ def parse_perf_script_from_iterator(
                 # Process the accumulated sample
                 sample = "\n".join(current_sample_lines)
                 _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
-                sample_count += 1
                 current_sample_lines = []
         else:
             # Accumulate lines for current sample
@@ -202,9 +257,6 @@ def parse_perf_script_from_iterator(
     if current_sample_lines:
         sample = "\n".join(current_sample_lines)
         _process_single_sample(sample, pid_to_collapsed_stacks_counters, insert_dso_name)
-        sample_count += 1
-
-    logger.debug(f"Parsed perf script output: {sample_count} samples")
 
     return pid_to_collapsed_stacks_counters
 

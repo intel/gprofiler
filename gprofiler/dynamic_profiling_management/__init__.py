@@ -3,18 +3,19 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Dict, Any, Optional, TYPE_CHECKING
 
+import bitmath
 import configargparse
 
 if TYPE_CHECKING:
-    from gprofiler.dynamic_profiling_management.heartbeat import HeartbeatClient
     from gprofiler.main import GProfiler
 
 from gprofiler.client import ProfilerAPIClient
 from gprofiler.dynamic_profiling_management.command_control import CommandManager, ProfilingCommand
 from gprofiler.metadata.enrichment import EnrichmentOptions
 from gprofiler.metadata.system_metadata import get_hostname
+from gprofiler.profilers.perf_events import validate_and_normalize_events
 from gprofiler.state import get_state
 from gprofiler.usage_loggers import NoopUsageLogger
 from gprofiler.utils import resource_path
@@ -33,6 +34,10 @@ PROFILER_TYPE_MAP = {
 }
 
 ALL_PROFILER_TYPES = {"perf", "java", "python", "php", "ruby", "dotnet", "nodejs"}
+
+# Valid values for the async_profiler "time" config key.
+# Mirrors SUPPORTED_AP_MODES in java.py plus "auto" (which resolves cpu/itimer at runtime).
+_VALID_AP_TIME_MODES = frozenset({"cpu", "itimer", "wall", "auto", "alloc"})
 
 
 def get_enabled_profiler_types(profiling_command: Dict[str, Any]) -> set:
@@ -117,15 +122,34 @@ def _apply_profiler_configs(new_args: configargparse.Namespace, profiler_configs
 
     # --- Perf ---
     perf_config = profiler_configs.get("perf", "enabled_restricted")
-    perf_mode = perf_config.get("mode", "enabled_restricted") if isinstance(perf_config, dict) else perf_config
-    if perf_mode == "enabled_restricted":
-        new_args.max_system_processes_for_system_profilers = 600
-        new_args.perf_max_docker_containers = 2
-    elif perf_mode == "enabled_aggressive":
-        new_args.max_system_processes_for_system_profilers = 1500
-        new_args.perf_max_docker_containers = 50
-    elif perf_mode == "disabled":
-        new_args.perf_mode = "disabled"
+    if isinstance(perf_config, dict):
+        perf_mode = perf_config.get("mode", "enabled_restricted")
+        perf_events = perf_config.get("events", ["cycles"])
+        if isinstance(perf_events, str):
+            perf_events = [perf_events]
+        elif not isinstance(perf_events, list):
+            perf_events = ["cycles"]
+        perf_events = validate_and_normalize_events(perf_events)
+
+        if perf_mode == "enabled_restricted":
+            new_args.max_system_processes_for_system_profilers = new_args.heartbeat_perf_restricted_max_system_processes
+            new_args.perf_max_docker_containers = new_args.heartbeat_perf_restricted_max_docker_containers
+        elif perf_mode == "enabled_aggressive":
+            new_args.max_system_processes_for_system_profilers = new_args.heartbeat_perf_aggressive_max_system_processes
+            new_args.perf_max_docker_containers = new_args.heartbeat_perf_aggressive_max_docker_containers
+        elif perf_mode == "disabled":
+            new_args.perf_mode = "disabled"
+        new_args.perf_events = ",".join(perf_events)
+    else:
+        if perf_config == "enabled_restricted":
+            new_args.max_system_processes_for_system_profilers = new_args.heartbeat_perf_restricted_max_system_processes
+            new_args.perf_max_docker_containers = new_args.heartbeat_perf_restricted_max_docker_containers
+        elif perf_config == "enabled_aggressive":
+            new_args.max_system_processes_for_system_profilers = new_args.heartbeat_perf_aggressive_max_system_processes
+            new_args.perf_max_docker_containers = new_args.heartbeat_perf_aggressive_max_docker_containers
+        elif perf_config == "disabled":
+            new_args.perf_mode = "disabled"
+        new_args.perf_events = "cycles"
 
     # --- Python ---
     pyperf_config = profiler_configs.get("pyperf", "enabled")
@@ -149,12 +173,38 @@ def _apply_profiler_configs(new_args: configargparse.Namespace, profiler_configs
         if not async_profiler_config.get("enabled", True):
             new_args.java_mode = "disabled"
         else:
-            new_args.java_async_profiler_mode = "wall" if async_profiler_config.get("time") == "wall" else "cpu"
+            time_mode = async_profiler_config.get("time", "cpu")
+            if time_mode not in _VALID_AP_TIME_MODES:
+                raise ValueError(
+                    f"Unknown async_profiler time mode {time_mode!r}. "
+                    f"Valid modes: {sorted(_VALID_AP_TIME_MODES)}"
+                )
+            if time_mode == "alloc":
+                # Allocation mode: profiling_mode drives _init_ap_mode to force alloc;
+                # frequency carries the alloc interval in bytes (as async-profiler expects).
+                new_args.profiling_mode = "allocation"
+                alloc_interval = async_profiler_config.get("alloc_interval", "2MB")
+                if not isinstance(alloc_interval, str) or not alloc_interval:
+                    raise ValueError(
+                        f"Invalid alloc_interval value {alloc_interval!r}: "
+                        "must be a non-empty string (e.g. '2MB', '512KiB')"
+                    )
+                try:
+                    new_args.frequency = int(bitmath.parse_string(alloc_interval).to_Byte())
+                except ValueError as e:
+                    raise ValueError(
+                        f"Could not parse alloc_interval {alloc_interval!r}: {e}"
+                    ) from e
+            else:
+                new_args.java_async_profiler_mode = time_mode
     else:
         if async_profiler_config == "disabled":
             new_args.java_mode = "disabled"
         elif async_profiler_config == "enabled_wall":
-            new_args.java_async_profiler_mode = "itimer"
+            new_args.java_async_profiler_mode = "wall"
+        elif async_profiler_config == "enabled_alloc":
+            new_args.profiling_mode = "allocation"
+            new_args.frequency = int(bitmath.parse_string("2MB").to_Byte())
         else:
             new_args.java_async_profiler_mode = "cpu"
 
@@ -189,6 +239,11 @@ def create_gprofiler_instance(args: configargparse.Namespace) -> Optional["GProf
             hostname=get_hostname(),
             verify=args.verify,
             upload_timeout=getattr(args, "server-upload-timeout", 120),
+            tls_client_cert=getattr(args, "tls_client_cert", None),
+            tls_client_key=getattr(args, "tls_client_key", None),
+            tls_ca_bundle=getattr(args, "tls_ca_bundle", None),
+            tls_cert_refresh_enabled=getattr(args, "tls_cert_refresh_enabled", False),
+            tls_cert_refresh_interval=getattr(args, "tls_cert_refresh_interval", 21600),
         )
 
     enrichment_options = EnrichmentOptions(
@@ -211,9 +266,8 @@ def create_gprofiler_instance(args: configargparse.Namespace) -> Optional["GProf
     if hasattr(args, "tool_perfspect_path") and args.tool_perfspect_path:
         perfspect_path = Path(args.tool_perfspect_path)
 
-    output_dir = getattr(args, "output_dir", None) or ""
     return GProfiler(
-        output_dir=output_dir,
+        output_dir=getattr(args, "output_dir", None),
         flamegraph=args.flamegraph,
         rotating_output=getattr(args, "rotating_output", False),
         rootless=getattr(args, "rootless", False),
@@ -251,10 +305,10 @@ class ProfilerSlotBase:
     def __init__(
         self,
         base_args: configargparse.Namespace,
-        heartbeat_client: "HeartbeatClient",
+        heartbeat_client,
         command_manager: "CommandManager",
         stop_event: threading.Event,
-    ) -> None:
+    ):
         self._base_args = base_args
         self._heartbeat_client = heartbeat_client
         self._command_manager = command_manager
@@ -280,9 +334,7 @@ class ProfilerSlotBase:
             except Exception as e:
                 logger.error(f"Error stopping {self.SLOT_NAME} profiler: {e}")
             try:
-                cleanup_fn = getattr(self.gprofiler, "maybe_cleanup_subprocesses", None)
-                if cleanup_fn is not None:
-                    cleanup_fn()
+                self.gprofiler.maybe_cleanup_subprocesses()
             except Exception as e:
                 logger.info(f"{self.SLOT_NAME} cleanup completed with minor errors: {e}")
             self.gprofiler = None

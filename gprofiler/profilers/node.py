@@ -40,6 +40,10 @@ from gprofiler.utils import TEMPORARY_STORAGE_PATH, add_permission_dir, pgrep_ex
 
 logger = get_logger_adapter(__name__)
 
+# Error detection constants
+_FILE_NOT_FOUND_ERROR = "No such file or directory"
+_NODE_MODULE_PATH_MARKER = "/node/module/"
+
 
 class NodeDebuggerUrlNotFound(Exception):
     pass
@@ -254,7 +258,17 @@ def generate_map_for_node_processes(processes: List[psutil.Process]) -> List[psu
             )
             node_processes_attached.append(process)
         except Exception as e:
-            logger.warning(f"Could not create debug symbols for pid {process.pid}. Reason: {e}", exc_info=True)
+            # Check if this is a version compatibility issue
+            if _FILE_NOT_FOUND_ERROR in str(e) and _NODE_MODULE_PATH_MARKER in str(e):
+                try:
+                    node_major_version = _get_node_major_version(process)
+                    logger.warning(f"Node.js debug symbols not available for version {node_major_version} (process {process.pid}). "
+                                 f"Profiling will continue without enhanced symbols. "
+                                 f"Consider updating gProfiler's Node.js support to include version {node_major_version}.")
+                except:
+                    logger.warning(f"Could not create debug symbols for pid {process.pid}. Reason: {e}")
+            else:
+                logger.warning(f"Could not create debug symbols for pid {process.pid}. Reason: {e}", exc_info=True)
     return node_processes_attached
 
 

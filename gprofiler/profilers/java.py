@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import signal
+import time
 from enum import Enum
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -54,7 +55,6 @@ if is_linux():
         get_process_nspid,
         resolve_proc_root_links,
         run_in_ns_wrapper,
-        is_root,
     )
     from granulate_utils.linux.oom import get_oom_entry
     from granulate_utils.linux.process import (
@@ -98,7 +98,7 @@ from gprofiler.utils import (
     touch_path,
     wait_event,
 )
-from gprofiler.utils.fs import is_owned_by_root, is_rw_exec_dir, mkdir_owned_root, safe_copy, safe_read_text
+from gprofiler.utils.fs import is_owned_by_root, is_rw_exec_dir, mkdir_owned_root, safe_copy
 from gprofiler.utils.perf import can_i_use_perf_events
 from gprofiler.utils.process import process_comm, search_proc_maps
 
@@ -163,7 +163,7 @@ JAVA_SAFEMODE_DEFAULT_OPTIONS = [
 ]
 
 
-SUPPORTED_AP_MODES = ["cpu", "itimer", "alloc"]
+SUPPORTED_AP_MODES = ["cpu", "itimer", "wall", "alloc"]
 
 
 # see StackWalkFeatures
@@ -186,10 +186,7 @@ class AsyncProfilerFeatures(str, Enum):
 
 
 SUPPORTED_AP_FEATURES = [o.value for o in AsyncProfilerFeatures]
-DEFAULT_AP_FEATURES = [
-    AsyncProfilerFeatures.probe_sp.value,
-    AsyncProfilerFeatures.vtable_target.value,
-]
+DEFAULT_AP_FEATURES = [AsyncProfilerFeatures.probe_sp.value, AsyncProfilerFeatures.vtable_target.value]
 
 # see options still here and not in "features":
 # https://github.com/async-profiler/async-profiler/blob/a17529378b47e6700d84f89d74ca5e6284ffd1a6/src/arguments.cpp#L262
@@ -213,14 +210,7 @@ class JavaFlagCollectionOptions(str, Enum):
 
 class JattachExceptionBase(CalledProcessError):
     def __init__(
-        self,
-        returncode: int,
-        cmd: Any,
-        stdout: Any,
-        stderr: Any,
-        target_pid: int,
-        ap_log: str,
-        ap_loaded: str,
+        self, returncode: int, cmd: Any, stdout: Any, stderr: Any, target_pid: int, ap_log: str, ap_loaded: str
     ):
         super().__init__(returncode, cmd, stdout, stderr)
         self._target_pid = target_pid
@@ -470,10 +460,7 @@ class JavaMetadata(ApplicationMetadata):
 
     @functools.lru_cache(maxsize=1024)
     def get_supported_jvm_flags(self, process: Process) -> Iterable[JvmFlag]:
-        return filter(
-            self.filter_jvm_flag,
-            parse_jvm_flags(self.jattach_jcmd_runner.run(process, "VM.flags -all")),
-        )
+        return filter(self.filter_jvm_flag, parse_jvm_flags(self.jattach_jcmd_runner.run(process, "VM.flags -all")))
 
 
 @functools.lru_cache(maxsize=1)
@@ -508,7 +495,7 @@ class AsyncProfiledProcess:
     Represents a process profiled with async-profiler.
     """
 
-    FORMAT_PARAMS = "ann,sig"
+    FORMAT_PARAMS = "ann,sig,threads"
     OUTPUT_FORMAT = "collapsed"
     OUTPUTS_MODE = 0o622  # readable by root, writable by all
 
@@ -531,7 +518,6 @@ class AsyncProfiledProcess:
         collect_meminfo: bool = True,
         include_method_modifiers: bool = False,
         java_line_numbers: str = "none",
-        collect_thread_names: bool = False,
     ):
         self.process = process
         self._profiler_state = profiler_state
@@ -542,7 +528,7 @@ class AsyncProfiledProcess:
         #   ancestor is still alive.
         # there is a hidden assumption here that neither the ancestor nor the process will change their mount
         # namespace. I think it's okay to assume that.
-        self._process_root = get_proc_root_path(process, from_ancestor=True if is_root() else False)
+        self._process_root = get_proc_root_path(process)
         self._cmdline = process.cmdline()
         self._cwd = process.cwd()
         self._nspid = get_process_nspid(self.process.pid)
@@ -572,7 +558,7 @@ class AsyncProfiledProcess:
         self._log_path_host = os.path.join(self._storage_dir_host, f"async-profiler-{self.process.pid}.log")
         self._log_path_process = remove_prefix(self._log_path_host, self._process_root)
 
-        assert mode in ("cpu", "itimer", "alloc"), f"unexpected mode: {mode}"
+        assert mode in ("cpu", "itimer", "wall", "alloc"), f"unexpected mode: {mode}"
         self._mode = mode
         self._fdtransfer_path = f"@async-profiler-{process.pid}-{secrets.token_hex(10)}" if mode == "cpu" else None
         self._ap_safemode = ap_safemode
@@ -583,7 +569,6 @@ class AsyncProfiledProcess:
         self._collect_meminfo = collect_meminfo
         self._include_method_modifiers = ",includemm" if include_method_modifiers else ""
         self._include_line_numbers = ",includeln" if java_line_numbers == "line-of-function" else ""
-        self._threads_enabled = ",threads" if collect_thread_names else ""
 
     def _find_rw_exec_dir(self) -> str:
         """
@@ -598,11 +583,6 @@ class AsyncProfiledProcess:
             full_dir = Path(resolve_proc_root_links(self._process_root, d))
             if not full_dir.parent.exists():
                 continue  # we do not create the parent.
-
-            # Bypass the root check in case of rootless collection
-            if not is_root():
-                logger.debug("_find_rw_exec_dir", full_dir=full_dir)
-                return str(full_dir)
 
             if not is_owned_by_root(full_dir.parent):
                 continue  # the parent needs to be owned by root
@@ -627,11 +607,9 @@ class AsyncProfiledProcess:
         # for sanity & simplicity, mkdir_owned_root() does not support creating parent directories, as this allows
         # the caller to absentmindedly ignore the check of the parents ownership.
         # hence we create the structure here part by part.
-        # Bypass the root check in case of rootless collection
-        if is_root():
-            assert is_owned_by_root(
-                Path(self._ap_dir_base)
-            ), f"expected {self._ap_dir_base} to be owned by root at this point"
+        assert is_owned_by_root(
+            Path(self._ap_dir_base)
+        ), f"expected {self._ap_dir_base} to be owned by root at this point"
         mkdir_owned_root(self._ap_dir_versioned)
         mkdir_owned_root(self._ap_dir_host)
         os.makedirs(self._storage_dir_host, 0o755, exist_ok=True)
@@ -694,11 +672,7 @@ class AsyncProfiledProcess:
             if not os.path.exists(self._libap_path_host):
                 # atomically copy it
                 libap_resource = resource_path(
-                    os.path.join(
-                        "java",
-                        "musl" if self._needs_musl_ap() else "glibc",
-                        "libasyncProfiler.so",
-                    )
+                    os.path.join("java", "musl" if self._needs_musl_ap() else "glibc", "libasyncProfiler.so")
                 )
                 os.chmod(
                     libap_resource, 0o755
@@ -746,7 +720,6 @@ class AsyncProfiledProcess:
     def _get_start_cmd(self, interval: int, ap_timeout: int) -> List[str]:
         return self._get_base_cmd() + [
             f"start,event={self._mode}"
-            f"{self._threads_enabled}"
             f"{self._get_ap_output_args()}{self._get_interval_arg(interval)},"
             f"log={self._log_path_process}"
             f"{f',fdtransfer={self._fdtransfer_path}' if self._mode == 'cpu' else ''}"
@@ -759,7 +732,6 @@ class AsyncProfiledProcess:
     def _get_stop_cmd(self, with_output: bool) -> List[str]:
         return self._get_base_cmd() + [
             f"stop,log={self._log_path_process},mcache={self._mcache}"
-            f"{self._threads_enabled}"
             f"{self._get_ap_output_args() if with_output else ''}"
             f"{',lib' if self._profiler_state.insert_dso_name else ''}{',meminfolog' if self._collect_meminfo else ''}"
             f"{self._get_extra_ap_args()}"
@@ -769,10 +741,11 @@ class AsyncProfiledProcess:
         if not os.path.exists(self._log_path_host):
             return "(log file doesn't exist)"
 
-        ap_log = safe_read_text(self._log_path_host)
+        log = Path(self._log_path_host)
+        ap_log = log.read_text()
         # clean immediately so we don't mix log messages from multiple invocations.
         # this is also what AP's profiler.sh does.
-        Path(self._log_path_host).unlink()
+        log.unlink()
         self._recreate_log()
         return ap_log
 
@@ -796,15 +769,7 @@ class AsyncProfiledProcess:
             except NoSuchProcess:
                 ap_loaded = "not sure, process exited"
 
-            args = (
-                e.returncode,
-                e.cmd,
-                e.stdout,
-                e.stderr,
-                self.process.pid,
-                ap_log,
-                ap_loaded,
-            )
+            args = e.returncode, e.cmd, e.stdout, e.stderr, self.process.pid, ap_log, ap_loaded
             if isinstance(e, CalledProcessTimeoutError):
                 raise JattachTimeout(*args, timeout=self._jattach_timeout) from None
             elif e.stderr == "Could not start attach mechanism: No such file or directory\n":
@@ -896,8 +861,8 @@ class AsyncProfiledProcess:
             dest="java_async_profiler_mode",
             choices=SUPPORTED_AP_MODES + ["auto"],
             default="auto",
-            help="Select async-profiler's mode: 'cpu' (based on perf_events & fdtransfer), 'itimer' (no perf_events)"
-            " or 'auto' (select 'cpu' if perf_events are available; otherwise 'itimer'). Defaults to '%(default)s'.",
+            help="Select async-profiler's mode: 'cpu' (CPU-only profiling), 'wall' (wall time including I/O waits),"
+            " 'itimer' (SIGPROF fallback), 'alloc' (allocation profiling), or 'auto' (select 'cpu' if perf_events are available; otherwise 'itimer'). Defaults to '%(default)s'.",
         ),
         ProfilerArgument(
             "--java-async-profiler-safemode",
@@ -997,15 +962,6 @@ class AsyncProfiledProcess:
             default="none",
             help="Select if async-profiler should add line numbers to frames",
         ),
-        ProfilerArgument(
-            "--java-collect-thread-names",
-            dest="java_collect_thread_names",
-            action="store_true",
-            default=False,
-            help="Enable per-sample thread name tracking. When enabled, each stack trace sample records "
-            "the thread name at sample time, allowing accurate attribution when threads are renamed "
-            "(e.g., in thread pools). Adds ~256KB memory and periodic thread name polling overhead.",
-        ),
     ],
     supported_profiling_modes=["cpu", "allocation"],
 )
@@ -1025,7 +981,6 @@ class JavaProfiler(SpawningProcessProfilerBase):
         18: (Version("18"), 36),
         19: (Version("19.0.1"), 10),
         21: (Version("21"), 22),
-        25: (Version("25"), 36),
     }
 
     # extra timeout seconds to add to the duration itself.
@@ -1053,8 +1008,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
         java_full_hserr: bool,
         java_include_method_modifiers: bool,
         java_line_numbers: str,
-        java_collect_thread_names: bool = False,
-        min_duration: int = 0,
+        min_duration: int = 10,
     ):
         assert java_mode == "ap", "Java profiler should not be initialized, wrong java_mode value given"
         super().__init__(frequency, duration, profiler_state, min_duration)
@@ -1085,27 +1039,20 @@ class JavaProfiler(SpawningProcessProfilerBase):
         self._enabled_proc_events_java = False
         self._collect_jvm_flags = self._init_collect_jvm_flags(java_collect_jvm_flags)
         self._jattach_jcmd_runner = JattachJcmdRunner(
-            stop_event=self._profiler_state.stop_event,
-            jattach_timeout=self._jattach_timeout,
+            stop_event=self._profiler_state.stop_event, jattach_timeout=self._jattach_timeout
         )
         self._ap_timeout = self._duration + self._AP_EXTRA_TIMEOUT_S
         application_identifiers.ApplicationIdentifiers.init_java(self._jattach_jcmd_runner)
         self._metadata = JavaMetadata(
-            self._profiler_state.stop_event,
-            self._jattach_jcmd_runner,
-            self._collect_jvm_flags,
+            self._profiler_state.stop_event, self._jattach_jcmd_runner, self._collect_jvm_flags
         )
         self._report_meminfo = java_async_profiler_report_meminfo
         self._java_full_hserr = java_full_hserr
         self._include_method_modifiers = java_include_method_modifiers
         self._java_line_numbers = java_line_numbers
-        self._collect_thread_names = java_collect_thread_names
 
     def _init_ap_mode(self, profiling_mode: str, ap_mode: str) -> None:
-        assert profiling_mode in (
-            "cpu",
-            "allocation",
-        ), "async-profiler support only cpu/allocation profiling modes"
+        assert profiling_mode in ("cpu", "allocation"), "async-profiler support only cpu/allocation profiling modes"
         if profiling_mode == "allocation":
             ap_mode = "alloc"
 
@@ -1152,14 +1099,13 @@ class JavaProfiler(SpawningProcessProfilerBase):
 
     def _disable_profiling(self, cause: str) -> None:
         if self._safemode_disable_reason is None and cause in self._java_safemode:
-            logger.warning(
-                "Java profiling has been disabled, will avoid profiling any new java processes",
-                cause=cause,
-            )
+            logger.warning("Java profiling has been disabled, will avoid profiling any new java processes", cause=cause)
             self._safemode_disable_reason = cause
 
     def _profiling_skipped_profile(self, reason: str, comm: str) -> ProfileData:
         return ProfileData(self._profiling_error_stack("skipped", reason, comm), None, None, None)
+
+
 
     def _is_jvm_type_supported(self, java_version_cmd_output: str) -> bool:
         return all(exclusion not in java_version_cmd_output for exclusion in self.JDK_EXCLUSIONS)
@@ -1291,6 +1237,9 @@ class JavaProfiler(SpawningProcessProfilerBase):
         return False
 
     def _profile_process(self, process: Process, duration: int, spawned: bool) -> ProfileData:
+        # Use full duration since young processes are now skipped entirely in _should_skip_process
+        actual_duration = duration
+        
         comm = process_comm(process)
         exe = process_exe(process)
         java_version_output: Optional[str] = get_java_version_logged(process, self._profiler_state.stop_event)
@@ -1322,6 +1271,11 @@ class JavaProfiler(SpawningProcessProfilerBase):
             self._profiled_pids.add(process.pid)
 
         logger.info(f"Profiling{' spawned' if spawned else ''} process {process.pid} with async-profiler")
+        
+        if actual_duration != duration:
+            process_age = self._get_process_age(process)
+            logger.debug(f"Adjusted async-profiler duration: {actual_duration}s (original: {duration}s) for young process {process.pid} (age: {process_age:.1f}s)")
+        
         container_name = self._profiler_state.get_container_name(process.pid)
         app_metadata = self._metadata.get_metadata(process)
         appid = application_identifiers.get_java_app_id(process, self._collect_spark_app_name)
@@ -1329,11 +1283,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
         if is_diagnostics():
             execfn = (app_metadata or {}).get("execfn")
             logger.debug("Process paths", pid=process.pid, execfn=execfn, exe=exe)
-            logger.debug(
-                "Process mapped files",
-                pid=process.pid,
-                maps=set(m.path for m in process.memory_maps()),
-            )
+            logger.debug("Process mapped files", pid=process.pid, maps=set(m.path for m in process.memory_maps()))
 
         with AsyncProfiledProcess(
             process,
@@ -1347,9 +1297,8 @@ class JavaProfiler(SpawningProcessProfilerBase):
             self._report_meminfo,
             self._include_method_modifiers,
             self._java_line_numbers,
-            self._collect_thread_names,
         ) as ap_proc:
-            stackcollapse = self._profile_ap_process(ap_proc, comm, duration)
+            stackcollapse = self._profile_ap_process(ap_proc, comm, actual_duration)
 
         return ProfileData(stackcollapse, appid, app_metadata, container_name)
 
@@ -1388,10 +1337,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
 
         try:
             wait_event(
-                duration,
-                self._profiler_state.stop_event,
-                lambda: not is_process_running(ap_proc.process),
-                interval=1,
+                duration, self._profiler_state.stop_event, lambda: not is_process_running(ap_proc.process), interval=1
             )
         except TimeoutError:
             # Process still running. We will stop the profiler in finally block.
@@ -1454,21 +1400,20 @@ class JavaProfiler(SpawningProcessProfilerBase):
         return pgrep_maps(DETECTED_JAVA_PROCESSES_REGEX)
 
     def _should_profile_process(self, process: Process) -> bool:
+        return search_proc_maps(process, DETECTED_JAVA_PROCESSES_REGEX) is not None and not self._should_skip_process(process)
+    
+    def _should_skip_process(self, process: Process) -> bool:
         # Skip short-lived processes - if a process is younger than min_duration,
         # it's likely to exit before profiling completes
-        if self._min_duration > 0:
-            try:
-                process_age = self._get_process_age(process)
-                if process_age < self._min_duration:
-                    logger.debug(
-                        f"Skipping young Java process {process.pid} "
-                        f"(age: {process_age:.1f}s < min_duration: {self._min_duration}s)"
-                    )
-                    return False
-            except Exception as e:
-                logger.debug(f"Could not determine age for Java process {process.pid}: {e}")
-
-        return search_proc_maps(process, DETECTED_JAVA_PROCESSES_REGEX) is not None
+        try:
+            process_age = self._get_process_age(process)
+            if process_age < self._min_duration:
+                logger.debug(f"Skipping young Java process {process.pid} (age: {process_age:.1f}s < min_duration: {self._min_duration}s)")
+                return True
+        except Exception as e:
+            logger.debug(f"Could not determine age for Java process {process.pid}: {e}")
+        
+        return False
 
     def start(self) -> None:
         super().start()
@@ -1531,10 +1476,7 @@ class JavaProfiler(SpawningProcessProfilerBase):
 
             signal_entry = get_signal_entry(text)
             if signal_entry is not None and signal_entry.pid in self._profiled_pids:
-                logger.warning(
-                    "Profiled Java process fatally signaled",
-                    signal=json.dumps(signal_entry._asdict()),
-                )
+                logger.warning("Profiled Java process fatally signaled", signal=json.dumps(signal_entry._asdict()))
                 self._disable_profiling(JavaSafemodeOptions.PROFILED_SIGNALED)
                 continue
 
