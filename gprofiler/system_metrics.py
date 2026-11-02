@@ -52,11 +52,12 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
         self._thread: Optional[Thread] = None
         self._lock = RLock()
 
-        self._get_cpu_utilization()  # Call this once to set the necessary data
-
     def start(self) -> None:
         assert self._thread is None, "SystemMetricsMonitor is already running"
         assert not self._stop_event.is_set(), "Stop condition is already set (perhaps gProfiler was already stopped?)"
+        # psutil keeps cpu_percent() state per thread, so initialize it here since this runs
+        # on the same thread that takes snapshots
+        self._get_cpu_utilization()
         self._thread = Thread(target=self._continuously_poll_memory, args=(self._polling_rate_seconds,))
         self._thread.start()
 
