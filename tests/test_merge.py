@@ -18,7 +18,8 @@
 Tests for the logic from gprofiler/merge.py
 """
 
-from typing import Dict
+import json
+from typing import Any, Dict
 
 import pytest
 from granulate_utils.metadata import Metadata
@@ -121,3 +122,38 @@ def test_merge_profiles_onto_errors(input_dict: Dict[str, str], expected: str) -
     header, outcome = header_outcome[0], header_outcome[1] if len(header_outcome) == 2 else ""
     assert header.startswith("#")
     assert expected == outcome
+
+
+@pytest.mark.parametrize(
+    "metrics,expected_ext",
+    [
+        pytest.param(Metrics(cpu_avg=1.0, mem_avg=2.0), {}, id="no_ext"),
+        pytest.param(
+            Metrics(cpu_avg=1.0, mem_avg=2.0, ext={"psi.cpu.some": 12.5}), {"psi.cpu.some": 12.5}, id="with_ext"
+        ),
+    ],
+)
+def test_merge_profiles_metrics_header(metrics: Metrics, expected_ext: Dict[str, Any]) -> None:
+    enrichment_options = EnrichmentOptions(
+        profile_api_version=None,
+        container_names=False,
+        application_identifiers=False,
+        application_identifier_args_filters=[],
+        application_metadata=False,
+    )
+    metadata: Metadata = dict(profiling_mode="cpu")
+    header = merge_profiles(
+        perf_pid_to_profiles={},
+        process_profiles={},
+        container_names_client=None,
+        enrichment_options=enrichment_options,
+        metadata=metadata,
+        metrics=metrics,
+        hwmetrics=None,
+        external_app_metadata={},
+    ).split("\n", maxsplit=1)[0]
+    assert header.startswith("# ")
+    profile_metadata = json.loads(header[2:])
+    # ext must not leak into "metrics"; the indexer reads only cpu_avg and mem_avg from it
+    assert profile_metadata["metrics"] == {"cpu_avg": 1.0, "mem_avg": 2.0}
+    assert profile_metadata["ext_metrics"] == expected_ext

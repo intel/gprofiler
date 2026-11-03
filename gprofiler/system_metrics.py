@@ -1,8 +1,8 @@
 import statistics
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Event, RLock, Thread
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import psutil
 
@@ -18,6 +18,8 @@ class Metrics:
     cpu_avg: Optional[float]
     # The average RAM usage between gProfiler cycles
     mem_avg: Optional[float]
+    # Additional metrics by name (see the ext_metrics header key). A missing name means "not collected"
+    ext: Dict[str, float] = field(default_factory=dict)
 
 
 class SystemMetricsMonitorBase(metaclass=ABCMeta):
