@@ -244,6 +244,7 @@ The metadata includes system metadata like the kernel version and CPU count, and
 The metrics collection will not be enabled if the `--upload-results`/`-u` flag is not set.
 Otherwise, you can disable metrics and metadata by using the following parameters:
 * Use `--disable-metrics-collection` to disable metrics collection
+* Use `--disable-psi-metrics` to disable collection of Linux pressure stall information (PSI) metrics
 * Use `--disable-metadata-collection` to disable metadata collection
 
 ### Continuous mode

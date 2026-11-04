@@ -219,6 +219,7 @@ def create_gprofiler_instance(args: configargparse.Namespace) -> Optional["GProf
         rootless=getattr(args, "rootless", False),
         profiler_api_client=profiler_api_client,
         collect_metrics=getattr(args, "collect_metrics", True),
+        collect_psi_metrics=getattr(args, "collect_psi_metrics", True),
         collect_metadata=getattr(args, "collect_metadata", True),
         enrichment_options=enrichment_options,
         state=state,

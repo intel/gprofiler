@@ -116,6 +116,7 @@ class GProfiler:
         rootless: bool,
         profiler_api_client: Optional[ProfilerAPIClient],
         collect_metrics: bool,
+        collect_psi_metrics: bool,
         collect_metadata: bool,
         enrichment_options: EnrichmentOptions,
         state: State,
@@ -144,6 +145,7 @@ class GProfiler:
         self._remote_logs_handler = remote_logs_handler
         self._profile_api_version = profile_api_version
         self._collect_metrics = collect_metrics
+        self._collect_psi_metrics = collect_psi_metrics
         self._collect_metadata = collect_metadata
         self._enrichment_options = enrichment_options
         self._static_metadata: Optional[ProfileMetadata] = None
@@ -183,7 +185,8 @@ class GProfiler:
         self._usage_logger = usage_logger
         if self._collect_metrics:
             self._system_metrics_monitor: SystemMetricsMonitorBase = SystemMetricsMonitor(
-                self._profiler_state.stop_event
+                self._profiler_state.stop_event,
+                collect_psi=self._collect_psi_metrics,
             )
         else:
             self._system_metrics_monitor = NoopSystemMetricsMonitor()
@@ -972,6 +975,14 @@ def parse_cmd_args() -> configargparse.Namespace:
     )
 
     parser.add_argument(
+        "--disable-psi-metrics",
+        action="store_false",
+        default=True,
+        dest="collect_psi_metrics",
+        help="Disable collecting and sending Linux pressure stall information to the Performance Studio",
+    )
+
+    parser.add_argument(
         "--disable-metadata-collection",
         action="store_false",
         default=True,
@@ -1518,6 +1529,7 @@ def main() -> None:
                 rootless=args.rootless,
                 profiler_api_client=profiler_api_client,
                 collect_metrics=args.collect_metrics,
+                collect_psi_metrics=args.collect_psi_metrics,
                 collect_metadata=args.collect_metadata,
                 enrichment_options=enrichment_options,
                 state=state,

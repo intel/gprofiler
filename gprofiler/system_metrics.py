@@ -1,13 +1,20 @@
+import math
 import statistics
+import time
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Event, RLock, Thread
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import psutil
 
 from gprofiler.exceptions import ThreadStopTimeoutError
+from gprofiler.log import get_logger_adapter
 
+logger = get_logger_adapter(__name__)
+
+MAX_EXT_METRICS = 32
 DEFAULT_POLLING_INTERVAL_SECONDS = 5
 STOP_TIMEOUT_SECONDS = 2
 
@@ -20,6 +27,63 @@ class Metrics:
     mem_avg: Optional[float]
     # Additional metrics by name (see the ext_metrics header key). A missing name means "not collected"
     ext: Dict[str, float] = field(default_factory=dict)
+
+
+def sanitize_ext_metrics(ext: Dict[str, float]) -> Dict[str, float]:
+    finite = {k: v for k, v in ext.items() if math.isfinite(v)}
+    if len(finite) > MAX_EXT_METRICS:
+        logger.warning(f"Dropping {len(finite) - MAX_EXT_METRICS} ext metrics over the cap of {MAX_EXT_METRICS}")
+        finite = dict(sorted(finite.items())[:MAX_EXT_METRICS])
+    return finite
+
+
+PSI_ROOT = Path("/proc/pressure")
+PSI_RESOURCES = ("cpu", "memory", "io")
+
+
+class PressureStallMonitor:
+    def __init__(self, root: Path = PSI_ROOT, clock: Callable[[], int] = time.monotonic_ns) -> None:
+        self._root = root
+        self._clock = clock
+        self._resources = list(PSI_RESOURCES)
+        self._prev: Dict[str, Tuple[int, int]] = {}  # resource -> (total_us, clock_ns)
+
+        if not root.is_dir():
+            logger.info(f"PSI metrics unavailable: {root} is missing (kernel < 4.20, CONFIG_PSI=n, or psi=0)")
+            self._resources = []
+
+    def _read_some_total_us(self, resource: str) -> int:
+        for line in (self._root / resource).read_text().splitlines():
+            if line.startswith("some "):
+                return int(line.rsplit("total=", 1)[1])
+        raise ValueError("no 'some' line")
+
+    def collect(self) -> Dict[str, float]:
+        values: Dict[str, float] = {}
+
+        for resource in list(self._resources):
+            try:
+                total_us = self._read_some_total_us(resource)
+            except (OSError, ValueError, IndexError) as e:
+                logger.info(f"PSI metric psi.{resource}.some unavailable, skipping it: {e!r}")
+                self._resources.remove(resource)
+                continue
+
+            now_ns = self._clock()
+            prev = self._prev.get(resource)
+            self._prev[resource] = (total_us, now_ns)
+            if prev is None:
+                continue
+
+            d_total_us, d_wall_ns = total_us - prev[0], now_ns - prev[1]
+            if d_total_us < 0 or d_wall_ns <= 0:
+                continue  # drop if counter reset or no time elapsed
+
+            pct = d_total_us * 100_000 / d_wall_ns
+
+            values[f"psi.{resource}.some"] = round(min(pct, 100.0), 2)
+
+        return values
 
 
 class SystemMetricsMonitorBase(metaclass=ABCMeta):
@@ -42,12 +106,22 @@ class SystemMetricsMonitorBase(metaclass=ABCMeta):
         """
         raise NotImplementedError
 
+    def _get_ext_metrics(self) -> Dict[str, float]:
+        return {}
+
     def get_metrics(self) -> Metrics:
-        return Metrics(self._get_cpu_utilization(), self._get_average_memory_utilization())
+        return Metrics(
+            self._get_cpu_utilization(),
+            self._get_average_memory_utilization(),
+            sanitize_ext_metrics(self._get_ext_metrics()),
+        )
 
 
 class SystemMetricsMonitor(SystemMetricsMonitorBase):
-    def __init__(self, stop_event: Event, polling_rate_seconds: int = DEFAULT_POLLING_INTERVAL_SECONDS):
+    def __init__(
+        self, stop_event: Event, polling_rate_seconds: int = DEFAULT_POLLING_INTERVAL_SECONDS, collect_psi: bool = True
+    ):
+        self._psi = PressureStallMonitor() if collect_psi else None
         self._polling_rate_seconds = polling_rate_seconds
         self._mem_percentages: List[float] = []
         self._stop_event = stop_event
@@ -60,6 +134,8 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
         # psutil keeps cpu_percent() state per thread, so initialize it here since this runs
         # on the same thread that takes snapshots
         self._get_cpu_utilization()
+        if self._psi is not None:
+            self._psi.collect()
         self._thread = Thread(target=self._continuously_poll_memory, args=(self._polling_rate_seconds,))
         self._thread.start()
 
@@ -93,6 +169,14 @@ class SystemMetricsMonitor(SystemMetricsMonitorBase):
         # None-blocking call. Must be called at least once before attempting to get a meaningful value.
         # See `psutil.cpu_percent` documentation.
         return psutil.cpu_percent(interval=None)
+
+    def _get_ext_metrics(self) -> Dict[str, float]:
+        ext: Dict[str, float] = {}
+
+        if self._psi is not None:
+            ext = self._psi.collect()
+
+        return ext
 
 
 class NoopSystemMetricsMonitor(SystemMetricsMonitorBase):
