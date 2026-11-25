@@ -70,7 +70,13 @@ from gprofiler.profilers.perf import SystemProfiler
 from gprofiler.profilers.profiler_base import NoopProfiler, ProcessProfilerBase, ProfilerInterface, SystemProfilerBase
 from gprofiler.profilers.registry import get_profilers_registry
 from gprofiler.state import State, init_state
-from gprofiler.system_metrics import Metrics, NoopSystemMetricsMonitor, SystemMetricsMonitor, SystemMetricsMonitorBase
+from gprofiler.system_metrics import (
+    Metrics,
+    NoopSystemMetricsMonitor,
+    SystemMetricsMonitor,
+    SystemMetricsMonitorBase,
+    sanitize_ext_metrics,
+)
 from gprofiler.usage_loggers import CgroupsUsageLogger, NoopUsageLogger, UsageLoggerInterface
 from gprofiler.utils import (
     TEMPORARY_STORAGE_PATH,
@@ -446,6 +452,7 @@ class GProfiler:
             )
         metrics = self._system_metrics_monitor.get_metrics()
         hwmetrics = self._hw_metrics_monitor.get_hw_metrics()
+        metrics.ext = sanitize_ext_metrics({**metrics.ext, **hwmetrics.ext})
         if hwmetrics is None:
             logger.info("No hw metrics were collected")
         else:

@@ -1,19 +1,32 @@
 import base64
 import gzip
+import math
 import os
 import platform
 import subprocess  # nosec B404
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, RLock, Thread
-from typing import Optional
+from typing import Dict, Optional
 
+from gprofiler.log import get_logger_adapter
 from gprofiler.utils.fs import mkdir_owned_root, safe_copy
+
+logger = get_logger_adapter(__name__)
 
 DEFAULT_POLLING_INTERVAL_SECONDS = 5
 STOP_TIMEOUT_SECONDS = 2
 PERFSPECT_DATA_DIRECTORY = "/tmp/perfspect_data"
+
+PERFSPECT_EXT_METRICS = {
+    "CPI": "perfspect.cpi",
+    "CPU operating frequency (in GHz)": "perfspect.cpu_freq_ghz",
+    "TMA_Frontend_Bound(%)": "perfspect.tma.frontend",
+    "TMA_Bad_Speculation(%)": "perfspect.tma.bad_spec",
+    "TMA_Backend_Bound(%)": "perfspect.tma.backend",
+    "TMA_Retiring(%)": "perfspect.tma.retiring",
+}
 
 
 @dataclass
@@ -22,6 +35,62 @@ class HWMetrics:
     metrics_data: Optional[dict]
     # base64 encoded HTML data
     metrics_html: Optional[str]
+    # PerfSpect metrics averaged over this cycle by ext metric name
+    ext: Dict[str, float] = field(default_factory=dict)
+
+
+class PerfSpectRawCsvReader:
+    """
+    Reads the rows PerfSpect appended to its raw metrics CSV since the last call (one row per interval)
+    and returns the mean of each metric over them.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._offset = 0
+        # ext metric name -> column index, set once the header line has been read
+        self._columns: Optional[Dict[str, int]] = None
+
+    def collect(self) -> Dict[str, float]:
+        try:
+            fd = os.open(self._path, os.O_RDONLY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            return {}
+        except OSError as e:
+            logger.warning(f"Can't read PerfSpect metrics from {self._path}: {e!r}")
+            return {}
+        with os.fdopen(fd, "rb") as f:
+            if os.fstat(f.fileno()).st_size < self._offset:
+                self._offset, self._columns = 0, None  # the file was recreated
+            f.seek(self._offset)
+            data = f.read()
+
+        # PerfSpect appends while we read, so leave a trailing partial line for the next call
+        complete = data[: data.rfind(b"\n") + 1]
+        self._offset += len(complete)
+
+        sums: Dict[str, float] = {}
+        counts: Dict[str, int] = {}
+        for line in complete.decode(errors="replace").splitlines():
+            fields = line.split(",")
+            if self._columns is None:
+                self._columns = {
+                    PERFSPECT_EXT_METRICS[n]: i for i, n in enumerate(fields) if n in PERFSPECT_EXT_METRICS
+                }
+                continue
+            for name, i in self._columns.items():
+                if i >= len(fields) or fields[i] == "":
+                    continue
+                try:
+                    value = float(fields[i])
+                except ValueError:
+                    continue
+                if not math.isfinite(value):
+                    continue
+                sums[name] = sums.get(name, 0.0) + value
+                counts[name] = counts.get(name, 0) + 1
+
+        return {name: sums[name] / counts[name] for name in sums}
 
 
 class HWMetricsMonitorBase(metaclass=ABCMeta):
@@ -47,8 +116,14 @@ class HWMetricsMonitorBase(metaclass=ABCMeta):
         """
         raise NotImplementedError
 
+    def _get_hw_ext_metrics(self) -> Dict[str, float]:
+        """
+        Returns the PerfSpect metrics for this cycle, by ext metric name
+        """
+        return {}
+
     def get_hw_metrics(self) -> HWMetrics:
-        return HWMetrics(self._get_hw_metrics_dict(), self._get_hw_metrics_html())
+        return HWMetrics(self._get_hw_metrics_dict(), self._get_hw_metrics_html(), self._get_hw_ext_metrics())
 
 
 class HWMetricsMonitor(HWMetricsMonitorBase):
@@ -78,6 +153,7 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
         )
 
         self._cleanup()
+        self._raw_csv_reader = PerfSpectRawCsvReader(self._ps_raw_csv_filename)
 
     def start(self) -> None:
         if (
@@ -155,6 +231,9 @@ class HWMetricsMonitor(HWMetricsMonitorBase):
 
         else:
             return None
+
+    def _get_hw_ext_metrics(self) -> Dict[str, float]:
+        return self._raw_csv_reader.collect()
 
     def _get_hw_metrics_html(self) -> Optional[str]:
         if os.path.exists(self._ps_summary_html_filename) and os.path.isfile(self._ps_summary_html_filename):
